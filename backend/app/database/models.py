@@ -1,0 +1,18 @@
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime
+from app.database.connection import Base
+
+class CallLog(Base):
+    """
+    SQLAlchemy model representing a saved call scam audit result.
+    """
+    __tablename__ = "call_logs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    transcript = Column(Text, nullable=False)
+    risk_score = Column(Float, nullable=False)
+    label = Column(String(50), nullable=False)  # SAFE, SUSPICIOUS, SCAM
+    scam_category = Column(String(100), nullable=False)
+    deepfake_probability = Column(Float, nullable=False)
+    explanation = Column(Text, nullable=False)
+    analyzed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
