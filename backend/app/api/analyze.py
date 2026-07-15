@@ -33,11 +33,7 @@ async def analyze_call(
     analysis_text = ""
     deepfake_prob = 0.0
     
-    if text:
-        analysis_text = text
-        # Direct text inputs have no deepfake voice biometric context
-        deepfake_prob = 0.05
-    elif file:
+    if file:
         # Check the file extension just to ensure it's a valid media format
         filename = file.filename.lower()
         if not any(filename.endswith(ext) for ext in [".wav", ".mp3", ".m4a", ".ogg", ".webm"]):
@@ -49,6 +45,10 @@ async def analyze_call(
         # Call WhisperService to transcribe and compute deepfake likelihood
         analysis_text = await WhisperService.transcribe_audio(file)
         deepfake_prob = await WhisperService.detect_deepfake(file)
+    else:
+        analysis_text = text
+        # Direct text inputs have no deepfake voice biometric context
+        deepfake_prob = 0.05
 
     # 3. Invoke Domain Service for content and advisory evaluation
     response = AnalyzerService.analyze_transcript(analysis_text)

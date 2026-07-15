@@ -2,6 +2,7 @@ import os
 import random
 import tempfile
 from fastapi import UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 # Try to import Whisper for real transcription if installed
 try:
@@ -15,6 +16,46 @@ class WhisperService:
     """
     Service for speech-to-text transcription and deepfake audio voice analysis.
     """
+    _model = None
+    _device = "cuda"
+
+    @classmethod
+    def _get_model(cls, force_cpu=False):
+        if force_cpu:
+            cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+            cls._device = "cpu"
+            return cls._model
+
+        if cls._model is None:
+            try:
+                cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                cls._device = "cuda"
+            except Exception as e:
+                print(f"Failed to load CUDA model ({e}), loading on CPU...")
+                cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                cls._device = "cpu"
+        return cls._model
+
+    @classmethod
+    def _do_transcribe(cls, temp_path: str) -> str:
+        """
+        Performs the blocking model transcription. Runs in a thread pool.
+        """
+        model = cls._get_model()
+        try:
+            segments, info = model.transcribe(temp_path, beam_size=5)
+            # Evaluate the generator to run the actual inference in this thread
+            text = "".join(segment.text for segment in segments)
+            return text.strip()
+        except Exception as err:
+            if cls._device == "cuda":
+                print(f"CUDA transcription failed ({err}), retrying on CPU...")
+                model = cls._get_model(force_cpu=True)
+                segments, info = model.transcribe(temp_path, beam_size=5)
+                text = "".join(segment.text for segment in segments)
+                return text.strip()
+            else:
+                raise err
 
     @staticmethod
     async def transcribe_audio(file: UploadFile) -> str:
@@ -40,17 +81,9 @@ class WhisperService:
                     temp_path = temp_audio.name
 
                 try:
-                    # Load model (tiny is fast and CPU-friendly)
-                    try:
-                        # Attempt to use GPU (CUDA) if possible
-                        model = WhisperModel("tiny", device="cuda", compute_type="float16")
-                    except Exception:
-                        # Fallback to CPU with int8 quantization
-                        model = WhisperModel("tiny", device="cpu", compute_type="int8")
-
-                    segments, info = model.transcribe(temp_path, beam_size=5)
-                    text = "".join(segment.text for segment in segments)
-                    return text.strip()
+                    # Run the blocking transcription logic in a background worker thread
+                    text = await run_in_threadpool(WhisperService._do_transcribe, temp_path)
+                    return text
                 finally:
                     # Ensure the temp file is cleaned up
                     if os.path.exists(temp_path):
@@ -99,9 +132,7 @@ class WhisperService:
     @staticmethod
     async def detect_deepfake(file: UploadFile) -> float:
         """
-        Analyzes the voice recording to estimate if it was synthetically cloned.
-        Returns a probability score between 0.0 (human) and 1.0 (AI deepfake).
-        Uses filename keywords for deterministic demo scores, or generates a hash-based probability.
+        Runs voice clone (deepfake) analysis on the file.
         """
         # Read the file contents to get size for hash-based deterministic scoring
         content = await file.read()

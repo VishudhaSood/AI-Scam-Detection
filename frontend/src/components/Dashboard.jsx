@@ -1,14 +1,114 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AnalysisDetails from './AnalysisDetails';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('audio'); // 'audio' or 'text'
+  const [audioMode, setAudioMode] = useState('upload'); // 'upload' or 'record'
   const [textInput, setTextInput] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+
+  // Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const recordingIntervalRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
+  // Clean up Object URL on unmount or file change
+  useEffect(() => {
+    if (selectedFile) {
+      const url = URL.createObjectURL(selectedFile);
+      setAudioUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setAudioUrl(null);
+    }
+  }, [selectedFile]);
+
+  // Clean up recording interval on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Microphone recording handlers
+  const startRecording = async () => {
+    setError(null);
+    setSelectedFile(null);
+    audioChunksRef.current = [];
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Determine supported mimeTypes for WebM / WAV / OGG
+      let mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/ogg';
+      }
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/wav';
+      }
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = ''; // Let browser decide fallback
+      }
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' });
+        const ext = mimeType.includes('wav') ? 'wav' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+        const file = new File([blob], `recorded_call.${ext}`, { type: blob.type });
+        setSelectedFile(file);
+        
+        // Release mic resources
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.error('Error starting audio recording:', err);
+      setError('Could not access microphone. Please check permissions and try again.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Drag and Drop Handlers
   const handleDrag = (e) => {
@@ -132,49 +232,147 @@ const Dashboard = () => {
         {/* Form Inputs */}
         <form onSubmit={handleSubmit}>
           {activeTab === 'audio' ? (
-            /* Audio File Dropzone */
-            <div 
-              className={`dropzone ${dragActive ? 'active' : ''}`}
-              onDragEnter={handleDrag}
-              onDragOver={handleDrag}
-              onDragLeave={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById('audio-file-input').click()}
-            >
-              <input 
-                id="audio-file-input"
-                type="file" 
-                className="file-input-hidden" 
-                accept="audio/*"
-                onChange={handleFileChange}
-              />
-              
-              {!selectedFile ? (
-                <>
-                  <div className="dropzone-icon">
-                    <svg style={{ width: '3rem', height: '3rem' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                    </svg>
-                  </div>
-                  <p style={{ fontWeight: 500 }}>Drag & Drop call recording</p>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports MP3, WAV, M4A, WEBM</p>
-                </>
+            <>
+              {/* Audio Mode Sub-selector */}
+              <div className="audio-mode-selector" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                <button 
+                  type="button" 
+                  className={`tab-btn sub-tab ${audioMode === 'upload' ? 'active' : ''}`}
+                  style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                  onClick={() => { setAudioMode('upload'); setError(null); }}
+                >
+                  Upload File
+                </button>
+                <button 
+                  type="button" 
+                  className={`tab-btn sub-tab ${audioMode === 'record' ? 'active' : ''}`}
+                  style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                  onClick={() => { setAudioMode('record'); setError(null); }}
+                >
+                  Record Mic
+                </button>
+              </div>
+
+              {audioMode === 'upload' ? (
+                /* Audio File Dropzone */
+                <div 
+                  className={`dropzone ${dragActive ? 'active' : ''}`}
+                  onDragEnter={handleDrag}
+                  onDragOver={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => document.getElementById('audio-file-input').click()}
+                >
+                  <input 
+                    id="audio-file-input"
+                    type="file" 
+                    className="file-input-hidden" 
+                    accept="audio/*"
+                    onChange={handleFileChange}
+                  />
+                  
+                  {!selectedFile ? (
+                    <>
+                      <div className="dropzone-icon">
+                        <svg style={{ width: '3rem', height: '3rem' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        </svg>
+                      </div>
+                      <p style={{ fontWeight: 500 }}>Drag & Drop call recording</p>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Supports MP3, WAV, M4A, WEBM</p>
+                    </>
+                  ) : (
+                    <div className="selected-file-info">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
+                        <svg style={{ width: '1.25rem', height: '1.25rem', color: 'var(--accent-blue)', flexShrink: 0 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          {selectedFile.name}
+                        </span>
+                      </div>
+                      <button type="button" className="remove-file-btn" onClick={removeFile}>
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
-                <div className="selected-file-info">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
-                    <svg style={{ width: '1.25rem', height: '1.25rem', color: 'var(--accent-blue)', flexShrink: 0 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                      {selectedFile.name}
-                    </span>
-                  </div>
-                  <button type="button" className="remove-file-btn" onClick={removeFile}>
-                    ✕
-                  </button>
+                /* Live Mic Recording Control Box */
+                <div 
+                  className="dropzone" 
+                  style={{ cursor: 'default', borderStyle: isRecording ? 'solid' : 'dashed', borderColor: isRecording ? 'var(--color-scam)' : 'rgba(255,255,255,0.15)' }}
+                >
+                  {isRecording ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', width: '100%' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <div className="status-dot" style={{ backgroundColor: 'var(--color-scam)', boxShadow: '0 0 8px var(--color-scam)' }}></div>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-scam)', fontSize: '0.8rem' }}>RECORDING IN PROGRESS</span>
+                      </div>
+                      <div style={{ fontSize: '2.5rem', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                        {formatDuration(recordingDuration)}
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={stopRecording}
+                        className="submit-btn" 
+                        style={{ background: 'var(--color-scam)', width: 'auto', padding: '0.6rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                      >
+                        <span style={{ fontSize: '0.8rem' }}>■</span> Stop Recording
+                      </button>
+                    </div>
+                  ) : !selectedFile ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                      <div className="dropzone-icon" style={{ color: 'var(--accent-purple)', filter: 'drop-shadow(0 0 8px rgba(139, 92, 246, 0.3))' }}>
+                        <svg style={{ width: '3rem', height: '3rem' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                        </svg>
+                      </div>
+                      <p style={{ fontWeight: 500 }}>Live Microphone Feed</p>
+                      <button 
+                        type="button" 
+                        onClick={startRecording}
+                        className="submit-btn" 
+                        style={{ width: 'auto', padding: '0.6rem 1.5rem' }}
+                      >
+                        Start Recording
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', width: '100%' }}>
+                      <div className="selected-file-info">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
+                          <svg style={{ width: '1.25rem', height: '1.25rem', color: 'var(--color-safe)', flexShrink: 0 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                          </svg>
+                          <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            {selectedFile.name} (Recorded Call)
+                          </span>
+                        </div>
+                        <button type="button" className="remove-file-btn" onClick={removeFile}>
+                          ✕
+                        </button>
+                      </div>
+
+                      {audioUrl && (
+                        <div style={{ width: '100%', marginTop: '0.5rem' }}>
+                          <audio src={audioUrl} controls style={{ width: '100%' }} />
+                        </div>
+                      )}
+
+                      <button 
+                        type="button" 
+                        onClick={startRecording}
+                        className="submit-btn" 
+                        style={{ width: 'auto', padding: '0.5rem 1.2rem', fontSize: '0.85rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}
+                      >
+                        Re-record Call
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           ) : (
             /* Direct Text Transcript Input */
             <textarea
