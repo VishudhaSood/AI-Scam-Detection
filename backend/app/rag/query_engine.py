@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from app.rag.vector_store import VectorStoreManager
 from app.models.schemas import Advisory, AnalysisResponse
 
-# Load environment variables from backend/.env
+# Load environment variables
 load_dotenv()
 
 logger = logging.getLogger("app.rag")
@@ -16,6 +16,7 @@ logger = logging.getLogger("app.rag")
 class RAGQueryEngine:
     """
     Query Engine coordinating RAG search in ChromaDB and Qwen-LLM analysis via OpenRouter.
+    Optimized to run in a single LLM API query request.
     """
 
     @classmethod
@@ -27,7 +28,6 @@ class RAGQueryEngine:
         try:
             collection = VectorStoreManager.get_collection()
             
-            # If the database is empty, return no advisories
             if collection.count() == 0:
                 logger.warning("ChromaDB collection is empty. Run index_docs.py first.")
                 return []
@@ -39,7 +39,6 @@ class RAGQueryEngine:
             
             advisories = []
             if results and "metadatas" in results and results["metadatas"]:
-                # Parse list of dictionaries returned by Chroma DB
                 metadata_list = results["metadatas"][0]
                 for meta in metadata_list:
                     advisories.append(Advisory(
@@ -56,13 +55,12 @@ class RAGQueryEngine:
     @classmethod
     def evaluate_transcript(cls, transcript: str) -> Dict[str, Any]:
         """
-        Performs a full scam evaluation. Retrieves relevant context from vector database
-        and prompts Qwen (via OpenRouter) to audit the conversation.
+        Retrieves matching context warnings and prompts Qwen to evaluate.
         """
         # 1. Retrieve RAG advisories
         advisories = cls.query_advisories(transcript, n_results=2)
         
-        # Format the advisories as context for the model prompt
+        # Format context
         context_str = ""
         for i, adv in enumerate(advisories):
             context_str += f"\nAdvisory {i+1} [{adv.source}]: {adv.title}\nDescription: {adv.description}\n"
@@ -71,13 +69,11 @@ class RAGQueryEngine:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         model_name = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
 
-        # Graceful fallback in case API key is missing during local setup
         if not api_key or "your_openrouter" in api_key.lower():
-            logger.warning("OPENROUTER_API_KEY is not configured in .env. Falling back to dynamic mock logic.")
-            # Standard fallback mock analysis to prevent crashes
+            logger.warning("OPENROUTER_API_KEY is not configured in .env. Running local fallback.")
             return cls._get_fallback_mock(transcript, advisories)
 
-        # 3. Initialize OpenRouter client using the OpenAI SDK
+        # 3. Initialize OpenRouter client
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
@@ -87,7 +83,6 @@ class RAGQueryEngine:
             }
         )
 
-        # Construct system instructions
         system_prompt = (
             "You are an AI Scam Auditor. Your task is to analyze the phone call transcript for fraud, phishing, or financial scam markers.\n"
             "Evaluate whether the conversation details match any warning patterns in the provided official regulatory advisories.\n\n"
@@ -111,12 +106,11 @@ class RAGQueryEngine:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Audit this call transcript:\n\"\"\"\n{transcript}\n\"\"\""}
                 ],
-                temperature=0.1  # Low temperature for deterministic classification
+                temperature=0.1
             )
 
             response_text = response.choices[0].message.content.strip()
             
-            # Clean up potential markdown code block backticks if Qwen outputs them
             if response_text.startswith("```"):
                 lines = response_text.split("\n")
                 if lines[0].startswith("```"):
@@ -126,20 +120,17 @@ class RAGQueryEngine:
                 response_text = "\n".join(lines).strip()
 
             result = json.loads(response_text)
-            
-            # Add retrieved advisories list to the final output dict
             result["advisories"] = advisories
             return result
 
         except Exception as e:
-            logger.error(f"Error during OpenRouter API evaluation: {e}")
-            # Fallback on exceptions (e.g. rate limit, context overflow, invalid response syntax)
+            logger.error(f"Error during OpenRouter evaluation: {e}")
             return cls._get_fallback_mock(transcript, advisories)
 
     @classmethod
     def _get_fallback_mock(cls, transcript: str, advisories: List[Advisory]) -> Dict[str, Any]:
         """
-        Helper fallback logic that returns keyword-based heuristics if the LLM fails or is unconfigured.
+        Heuristic fallback if LLM querying fails.
         """
         text_lower = transcript.lower()
         if any(kw in text_lower for kw in ["lottery", "prize", "win", "crore", "lakh"]):
