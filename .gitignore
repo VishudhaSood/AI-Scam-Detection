@@ -226,3 +226,6 @@ frontend/node_modules/
 # Local Session History & Progress Tracker
 local_session_history.md
 
+# Local Vector Database Folder
+backend/chroma_db/
+backend/app/database/chroma_db/
