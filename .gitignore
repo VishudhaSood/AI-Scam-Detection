@@ -222,3 +222,7 @@ __marimo__/
 
 # Frontend Dependencies
 frontend/node_modules/
+
+# Local Session History & Progress Tracker
+local_session_history.md
+
