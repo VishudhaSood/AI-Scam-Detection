@@ -222,3 +222,7 @@ __marimo__/
 
 # Frontend Dependencies
 frontend/node_modules/
+
+# Local Vector Database Folder
+backend/chroma_db/
+backend/app/database/chroma_db/
