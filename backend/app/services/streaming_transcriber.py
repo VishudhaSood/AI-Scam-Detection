@@ -3,6 +3,8 @@ import av
 import numpy as np
 from faster_whisper import WhisperModel
 
+from app.services.cuda_check import cuda_runtime_available
+
 class StreamingTranscriber:
     """
     Handles audio decoding via PyAV and speech-to-text via faster-whisper.
@@ -14,26 +16,29 @@ class StreamingTranscriber:
     @classmethod
     def _get_model(cls):
         if cls._model is None:
-            try:
-                # Attempt to load tiny model on CUDA
-                model = WhisperModel("tiny", device="cuda", compute_type="float16")
-                # ctranslate2 defers loading the CUDA DLLs until the first
-                # inference, so a successful constructor does not prove CUDA
-                # works. Probe with a dummy inference: a broken CUDA model
-                # (e.g. missing cublas64_12.dll) errors once here — and would
-                # deadlock the process on any later call if we cached it.
-                probe_segments, _ = model.transcribe(
-                    np.zeros(16000, dtype=np.float32), beam_size=1
-                )
-                list(probe_segments)
-                cls._device = "cuda"
-                print("Loaded Whisper tiny model on CUDA.")
-            except Exception as e:
-                print(f"Failed to load Whisper on CUDA ({e}), falling back to CPU...")
-                # Fallback to CPU with int8 quantization
+            # Never let ctranslate2 attempt a CUDA load when the runtime DLLs
+            # are absent: a failed in-process load can poison the Windows DLL
+            # loader and deadlock later native calls (see cuda_check.py).
+            if cuda_runtime_available():
+                try:
+                    model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                    # Constructor success does not prove CUDA works (DLL load
+                    # is deferred to first inference) — probe before caching.
+                    probe_segments, _ = model.transcribe(
+                        np.zeros(16000, dtype=np.float32), beam_size=1
+                    )
+                    list(probe_segments)
+                    cls._device = "cuda"
+                    print("Loaded Whisper tiny model on CUDA.")
+                except Exception as e:
+                    print(f"Failed to load Whisper on CUDA ({e}), falling back to CPU...")
+                    model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                    cls._device = "cpu"
+                    print("Loaded Whisper tiny model on CPU.")
+            else:
+                print("CUDA runtime libraries not found; using CPU int8 Whisper model.")
                 model = WhisperModel("tiny", device="cpu", compute_type="int8")
                 cls._device = "cpu"
-                print("Loaded Whisper tiny model on CPU.")
             cls._model = model
         return cls._model
 

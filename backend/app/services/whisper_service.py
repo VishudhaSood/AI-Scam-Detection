@@ -11,6 +11,8 @@ try:
 except ImportError:
     HAS_WHISPER = False
 
+from app.services.cuda_check import cuda_runtime_available
+
 
 class WhisperService:
     """
@@ -27,6 +29,13 @@ class WhisperService:
             return cls._model
 
         if cls._model is None:
+            # Same guard as StreamingTranscriber: attempting a CUDA load
+            # without the runtime DLLs can poison the process (cuda_check.py).
+            if not cuda_runtime_available():
+                print("CUDA runtime libraries not found; using CPU int8 Whisper model.")
+                cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                cls._device = "cpu"
+                return cls._model
             try:
                 cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
                 cls._device = "cuda"
