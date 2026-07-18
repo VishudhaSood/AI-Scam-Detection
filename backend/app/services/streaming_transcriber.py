@@ -16,15 +16,25 @@ class StreamingTranscriber:
         if cls._model is None:
             try:
                 # Attempt to load tiny model on CUDA
-                cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                # ctranslate2 defers loading the CUDA DLLs until the first
+                # inference, so a successful constructor does not prove CUDA
+                # works. Probe with a dummy inference: a broken CUDA model
+                # (e.g. missing cublas64_12.dll) errors once here — and would
+                # deadlock the process on any later call if we cached it.
+                probe_segments, _ = model.transcribe(
+                    np.zeros(16000, dtype=np.float32), beam_size=1
+                )
+                list(probe_segments)
                 cls._device = "cuda"
                 print("Loaded Whisper tiny model on CUDA.")
             except Exception as e:
                 print(f"Failed to load Whisper on CUDA ({e}), falling back to CPU...")
                 # Fallback to CPU with int8 quantization
-                cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                model = WhisperModel("tiny", device="cpu", compute_type="int8")
                 cls._device = "cpu"
                 print("Loaded Whisper tiny model on CPU.")
+            cls._model = model
         return cls._model
 
     def decode_to_pcm(self, audio_bytes: bytes) -> np.ndarray:
