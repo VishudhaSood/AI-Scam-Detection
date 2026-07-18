@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AnalysisDetails from './AnalysisDetails';
+import LiveCallMonitor from './LiveCallMonitor';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('audio'); // 'audio' or 'text'
@@ -204,6 +205,42 @@ const Dashboard = () => {
     }
   };
 
+  // Shared between the classic scanner card and the live monitor card,
+  // so switching tabs stays possible from every view.
+  const tabSelector = (
+    <div className="tab-selector">
+      <button
+        type="button"
+        className={`tab-btn ${activeTab === 'audio' ? 'active' : ''}`}
+        onClick={() => { setActiveTab('audio'); setError(null); }}
+      >
+        Call Recording
+      </button>
+      <button
+        type="button"
+        className={`tab-btn ${activeTab === 'text' ? 'active' : ''}`}
+        onClick={() => { setActiveTab('text'); setError(null); }}
+      >
+        Direct Transcript
+      </button>
+      <button
+        type="button"
+        className={`tab-btn ${activeTab === 'live' ? 'active' : ''}`}
+        onClick={() => { setActiveTab('live'); setError(null); }}
+      >
+        Live Monitor
+      </button>
+    </div>
+  );
+
+  if (activeTab === 'live') {
+    return (
+      <div className="dashboard-grid">
+        <LiveCallMonitor header={tabSelector} />
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard-grid">
       {/* Left Column: Upload / Controls Card */}
@@ -211,23 +248,7 @@ const Dashboard = () => {
         <h2>Threat Scanner</h2>
         <p className="subtitle">Submit call audio or paste a conversation to audit for scams</p>
 
-        {/* Tab Selection */}
-        <div className="tab-selector">
-          <button 
-            type="button" 
-            className={`tab-btn ${activeTab === 'audio' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('audio'); setError(null); }}
-          >
-            Call Recording
-          </button>
-          <button 
-            type="button" 
-            className={`tab-btn ${activeTab === 'text' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('text'); setError(null); }}
-          >
-            Direct Transcript
-          </button>
-        </div>
+        {tabSelector}
 
         {/* Form Inputs */}
         <form onSubmit={handleSubmit}>
