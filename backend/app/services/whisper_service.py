@@ -1,8 +1,25 @@
+import ctypes
 import os
+import platform
+
+# Preload system C++ runtime DLLs on Windows to prevent Anaconda DLL Hell crash
+if platform.system() == "Windows":
+    try:
+        windir = os.environ.get("SystemRoot", os.environ.get("windir", "C:\\Windows"))
+        system32 = os.path.join(windir, "System32")
+        for dll in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"]:
+            dll_path = os.path.join(system32, dll)
+            if os.path.exists(dll_path):
+                ctypes.CDLL(dll_path)
+    except Exception:
+        pass
+
 import random
 import tempfile
 from fastapi import UploadFile
 from fastapi.concurrency import run_in_threadpool
+
+import threading
 
 # Try to import Whisper for real transcription if installed
 try:
@@ -20,30 +37,44 @@ class WhisperService:
     """
     _model = None
     _device = "cuda"
+    _model_lock = threading.Lock()
 
     @classmethod
     def _get_model(cls, force_cpu=False):
-        if force_cpu:
-            cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
-            cls._device = "cpu"
-            return cls._model
-
-        if cls._model is None:
-            # Same guard as StreamingTranscriber: attempting a CUDA load
-            # without the runtime DLLs can poison the process (cuda_check.py).
-            if not cuda_runtime_available():
-                print("CUDA runtime libraries not found; using CPU int8 Whisper model.")
+        with cls._model_lock:
+            if force_cpu:
                 cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
                 cls._device = "cpu"
                 return cls._model
-            try:
-                cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
-                cls._device = "cuda"
-            except Exception as e:
-                print(f"Failed to load CUDA model ({e}), loading on CPU...")
-                cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
-                cls._device = "cpu"
-        return cls._model
+
+            if cls._model is None:
+                # Same guard as StreamingTranscriber: attempting a CUDA load
+                # without the runtime DLLs can poison the process (cuda_check.py).
+                if not cuda_runtime_available():
+                    print("CUDA runtime libraries not found; using CPU int8 Whisper model.")
+                    cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                    cls._device = "cpu"
+                    return cls._model
+                try:
+                    cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                    cls._device = "cuda"
+                except Exception as e:
+                    print(f"Failed to load CUDA model ({e}), loading on CPU...")
+                    cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                    cls._device = "cpu"
+            return cls._model
+
+    @classmethod
+    def eager_load_model(cls):
+        if os.environ.get("USE_MOCK_WHISPER") == "true":
+            print("Eager loading WhisperService model skipped: mock mode active.")
+            return
+        try:
+            print("Eagerly loading WhisperService Whisper model...")
+            cls._get_model()
+            print("WhisperService Whisper model preloaded successfully!")
+        except Exception as e:
+            print(f"Failed to eager load WhisperService model: {e}")
 
     @classmethod
     def _do_transcribe(cls, temp_path: str) -> str:
@@ -52,7 +83,12 @@ class WhisperService:
         """
         model = cls._get_model()
         try:
-            segments, info = model.transcribe(temp_path, beam_size=5)
+            segments, info = model.transcribe(
+                temp_path,
+                beam_size=5,
+                language="en",
+                vad_filter=True
+            )
             # Evaluate the generator to run the actual inference in this thread
             text = "".join(segment.text for segment in segments)
             return text.strip()
@@ -60,7 +96,12 @@ class WhisperService:
             if cls._device == "cuda":
                 print(f"CUDA transcription failed ({err}), retrying on CPU...")
                 model = cls._get_model(force_cpu=True)
-                segments, info = model.transcribe(temp_path, beam_size=5)
+                segments, info = model.transcribe(
+                    temp_path,
+                    beam_size=5,
+                    language="en",
+                    vad_filter=True
+                )
                 text = "".join(segment.text for segment in segments)
                 return text.strip()
             else:

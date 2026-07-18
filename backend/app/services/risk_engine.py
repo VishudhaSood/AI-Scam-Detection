@@ -56,3 +56,101 @@ class RiskEngine:
             label = "SAFE"
 
         return combined, label
+
+
+import time
+
+class AdaptiveRiskEngine:
+    """
+    Stateful risk engine for live calls (Milestone 8).
+    Tracks EMA smoothing, ratchet floor, confidence, and state machine with hysteresis.
+    """
+    def __init__(self):
+        # Per-session state
+        self.smoothed_risk = 0.0
+        self.peak_smoothed = 0.0
+        self.ratchet_floor = 0.0
+        self.mode = "MONITOR"  # MONITOR | VERIFY | DANGER
+        
+        # Timestamps for exit timers (hysteresis)
+        self.verify_exit_low_start = None  # Start timestamp when risk < 0.35 sustained
+        self.danger_exit_low_start = None  # Start timestamp when risk < 0.65 sustained
+
+    def process_cycle(self, risk_raw: float, word_count: int, llm_audits_done: int) -> tuple[float, float, str]:
+        """
+        Runs one cycle of the stateful risk engine:
+        1. Smooth raw risk using EMA (alpha = 0.35)
+        2. Apply ratchet floor
+        3. Compute confidence
+        4. Compute next mode with hysteresis
+        
+        Returns:
+            tuple[float, float, str]: (smoothed_risk, confidence, mode)
+        """
+        # 1. EMA Smoothing
+        alpha = 0.35
+        # If it's the very first cycle, initialize smoothed_risk directly to risk_raw
+        if self.smoothed_risk == 0.0 and self.peak_smoothed == 0.0:
+            self.smoothed_risk = risk_raw
+        else:
+            self.smoothed_risk = alpha * risk_raw + (1 - alpha) * self.smoothed_risk
+            
+        # 2. Ratchet Floor
+        self.peak_smoothed = max(self.peak_smoothed, self.smoothed_risk)
+        self.ratchet_floor = max(self.ratchet_floor, 0.75 * self.peak_smoothed)
+        self.smoothed_risk = max(self.smoothed_risk, self.ratchet_floor)
+        
+        # Round smoothed risk
+        self.smoothed_risk = round(max(0.0, min(1.0, self.smoothed_risk)), 2)
+
+        # 3. Confidence Calculation
+        # confidence = min(1.0, words_heard / 120) * min(1.0, llm_audits_done / 2)
+        word_factor = min(1.0, word_count / 120.0)
+        audit_factor = min(1.0, llm_audits_done / 2.0)
+        confidence = round(word_factor * audit_factor, 2)
+
+        # 4. State Machine & Hysteresis
+        now = time.time()
+        
+        # Evaluate natural target state based on raw thresholds
+        if self.smoothed_risk >= 0.75:
+            natural_mode = "DANGER"
+        elif self.smoothed_risk >= 0.40:
+            natural_mode = "VERIFY"
+        else:
+            natural_mode = "MONITOR"
+
+        # Apply state transitions with hysteresis
+        if self.mode == "MONITOR":
+            # MONITOR -> VERIFY: Instant transition when risk >= 0.40
+            if natural_mode in ["VERIFY", "DANGER"]:
+                self.mode = "VERIFY"
+                self.verify_exit_low_start = None
+            
+        elif self.mode == "VERIFY":
+            # VERIFY -> DANGER: Instant transition when risk >= 0.75
+            if natural_mode == "DANGER":
+                self.mode = "DANGER"
+                self.danger_exit_low_start = None
+            # VERIFY -> MONITOR: Exits below 0.35 sustained for 15s
+            elif self.smoothed_risk < 0.35:
+                if self.verify_exit_low_start is None:
+                    self.verify_exit_low_start = now
+                elif now - self.verify_exit_low_start >= 15.0:
+                    self.mode = "MONITOR"
+                    self.verify_exit_low_start = None
+            else:
+                self.verify_exit_low_start = None
+
+        elif self.mode == "DANGER":
+            # DANGER -> VERIFY: Exits below 0.65 sustained for 20s
+            if self.smoothed_risk < 0.65:
+                if self.danger_exit_low_start is None:
+                    self.danger_exit_low_start = now
+                elif now - self.danger_exit_low_start >= 20.0:
+                    self.mode = "VERIFY"
+                    self.danger_exit_low_start = None
+            else:
+                self.danger_exit_low_start = None
+
+        return self.smoothed_risk, confidence, self.mode

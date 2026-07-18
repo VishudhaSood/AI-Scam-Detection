@@ -20,6 +20,17 @@ def create_app() -> FastAPI:
         redoc_url="/redoc"
     )
 
+    @app.on_event("startup")
+    def startup_event():
+        try:
+            # Eagerly load Whisper models on startup to prevent lockups and DLL race conditions
+            from app.services.streaming_transcriber import StreamingTranscriber
+            from app.services.whisper_service import WhisperService
+            StreamingTranscriber.eager_load_model()
+            WhisperService.eager_load_model()
+        except Exception as e:
+            print(f"Error preloading Whisper models on startup: {e}")
+
     # 1. Configure CORS
     # React default Vite port is 5173. We allow localhost for development.
     origins = [

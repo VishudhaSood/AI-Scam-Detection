@@ -11,13 +11,36 @@ const LiveCallMonitor = ({ header }) => {
   const [update, setUpdate] = useState(null);       // latest LiveUpdate from server
   const [finalResult, setFinalResult] = useState(null); // LiveFinal (renders via AnalysisDetails)
   const [error, setError] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [transcriptionMode, setTranscriptionMode] = useState('webspeech'); // 'webspeech' | 'whisper'
 
   // Mutable machinery lives in refs: changing these must not re-render the UI
   const wsRef = useRef(null);
+  const recognitionRef = useRef(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
+  const statusRef = useRef(status);
+
+  // Track accumulated and current session committed transcripts across silence-induced restarts
+  const accumulatedCommittedRef = useRef('');
+  const currentSessionCommittedRef = useRef('');
+
+  // Sync status to ref to access it cleanly in async callbacks without closures issues
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const releaseMic = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.onerror = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop();
+      recorderRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -27,9 +50,6 @@ const LiveCallMonitor = ({ header }) => {
   // Safety net: leaving the tab/page mid-session must free the mic and socket
   useEffect(() => {
     return () => {
-      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-        recorderRef.current.stop();
-      }
       releaseMic();
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
@@ -37,11 +57,24 @@ const LiveCallMonitor = ({ header }) => {
     };
   }, []);
 
-  const startMonitoring = async () => {
-    setError(null);
-    setUpdate(null);
-    setFinalResult(null);
+  // Smooth UI timer ticking every second during live monitoring
+  useEffect(() => {
+    let timerId = null;
+    if (status === 'live') {
+      timerId = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else if (status === 'idle' || status === 'connecting') {
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (timerId) {
+        clearInterval(timerId);
+      }
+    };
+  }, [status]);
 
+  const startWhisperRecording = async (ws) => {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -51,6 +84,35 @@ const LiveCallMonitor = ({ header }) => {
       return;
     }
     streamRef.current = stream;
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    recorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+        ws.send(e.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      releaseMic();
+    };
+
+    recorder.start(CHUNK_MS);
+    setStatus('live');
+  };
+
+  const startMonitoring = async () => {
+    setError(null);
+    setUpdate(null);
+    setFinalResult(null);
+    setElapsedSeconds(0);
+
+    // Clear the accumulated transcripts for a fresh session
+    accumulatedCommittedRef.current = '';
+    currentSessionCommittedRef.current = '';
+
     setStatus('connecting');
 
     const ws = new WebSocket(WS_URL);
@@ -60,29 +122,83 @@ const LiveCallMonitor = ({ header }) => {
       // Protocol: the first frame must be the JSON "start" control message
       ws.send(JSON.stringify({ type: 'start', caller_number: callerNumber.trim() || null }));
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      recorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        // One continuous recorder => only chunk #1 carries the webm header,
-        // so the server can byte-append chunks into a single valid file.
-        if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          ws.send(e.data);
+      if (transcriptionMode === 'webspeech') {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          console.warn('Web Speech API is not supported in this browser. Falling back to Whisper...');
+          setTranscriptionMode('whisper');
+          startWhisperRecording(ws);
+          return;
         }
-      };
 
-      recorder.onstop = () => {
-        // dataavailable (final flush) is guaranteed to fire before onstop,
-        // so by now every chunk is on the wire and "end" can go out safely.
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'end' }));
-        }
-        releaseMic();
-      };
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US'; // Lock language to English for clean transcription
+        recognitionRef.current = recognition;
 
-      recorder.start(CHUNK_MS);
-      setStatus('live');
+        recognition.onresult = (event) => {
+          let sessionCommittedText = '';
+          let partialText = '';
+
+          for (let i = 0; i < event.results.length; i++) {
+            const result = event.results[i];
+            if (result.isFinal) {
+              sessionCommittedText += result[0].transcript + ' ';
+            } else {
+              partialText += result[0].transcript;
+            }
+          }
+
+          // Keep track of what has been finalized in this session segment
+          currentSessionCommittedRef.current = sessionCommittedText;
+
+          // Combine previously accumulated text with the current session segment's text
+          const totalCommitted = (accumulatedCommittedRef.current + ' ' + sessionCommittedText).trim();
+
+          // Stream the accumulated text chunks to the backend
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'text_chunk',
+              transcript_committed: totalCommitted,
+              transcript_partial: partialText.trim()
+            }));
+          }
+        };
+
+        recognition.onend = () => {
+          // Save the final committed text from the ended segment into the accumulator
+          accumulatedCommittedRef.current = (accumulatedCommittedRef.current + ' ' + currentSessionCommittedRef.current).trim();
+          currentSessionCommittedRef.current = '';
+
+          // Auto-restart recognition if we are still live (handles long silences)
+          if (statusRef.current === 'live') {
+            try {
+              recognition.start();
+            } catch (e) {
+              console.error('Failed to restart speech recognition:', e);
+            }
+          }
+        };
+
+        recognition.onerror = (e) => {
+          console.error('Speech recognition error:', e.error);
+          if (e.error === 'not-allowed') {
+            setError('Microphone permission blocked. Please allow mic access in your browser settings.');
+          } else {
+            console.warn(`Speech recognition error "${e.error}". Falling back to Whisper mode...`);
+            setTranscriptionMode('whisper');
+            releaseMic();
+            startWhisperRecording(ws);
+          }
+        };
+
+        recognition.start();
+        setStatus('live');
+      } else {
+        // Direct Whisper mode
+        startWhisperRecording(ws);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -108,8 +224,9 @@ const LiveCallMonitor = ({ header }) => {
 
   const stopMonitoring = () => {
     setStatus('stopping');
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop(); // triggers final flush -> "end" -> server "final"
+    releaseMic();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'end' }));
     }
   };
 
@@ -152,6 +269,48 @@ const LiveCallMonitor = ({ header }) => {
           }}
         />
 
+        <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+          Transcription Source
+        </label>
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+          <button
+            type="button"
+            onClick={() => setTranscriptionMode('webspeech')}
+            disabled={isRunning}
+            style={{
+              flex: 1,
+              padding: '0.5rem 0.6rem',
+              fontSize: '0.75rem',
+              borderRadius: '0.375rem',
+              border: '1px solid ' + (transcriptionMode === 'webspeech' ? 'var(--accent-purple, #8b5cf6)' : 'rgba(255,255,255,0.15)'),
+              background: transcriptionMode === 'webspeech' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+              color: transcriptionMode === 'webspeech' ? '#fff' : 'var(--text-muted, #9ca3af)',
+              cursor: isRunning ? 'not-allowed' : 'pointer',
+              fontWeight: 500
+            }}
+          >
+            🎙️ Browser Speech
+          </button>
+          <button
+            type="button"
+            onClick={() => setTranscriptionMode('whisper')}
+            disabled={isRunning}
+            style={{
+              flex: 1,
+              padding: '0.5rem 0.6rem',
+              fontSize: '0.75rem',
+              borderRadius: '0.375rem',
+              border: '1px solid ' + (transcriptionMode === 'whisper' ? 'var(--accent-purple, #8b5cf6)' : 'rgba(255,255,255,0.15)'),
+              background: transcriptionMode === 'whisper' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+              color: transcriptionMode === 'whisper' ? '#fff' : 'var(--text-muted, #9ca3af)',
+              cursor: isRunning ? 'not-allowed' : 'pointer',
+              fontWeight: 500
+            }}
+          >
+            🤖 Local Whisper
+          </button>
+        </div>
+
         <div
           className="dropzone"
           style={{
@@ -161,7 +320,7 @@ const LiveCallMonitor = ({ header }) => {
           }}
         >
           {status === 'live' || status === 'stopping' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', width: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <div className="status-dot" style={{ backgroundColor: 'var(--color-scam)', boxShadow: '0 0 8px var(--color-scam)' }}></div>
                 <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-scam)', fontSize: '0.8rem' }}>
@@ -169,7 +328,10 @@ const LiveCallMonitor = ({ header }) => {
                 </span>
               </div>
               <div style={{ fontSize: '2.5rem', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                {formatDuration(update ? update.elapsed_s : 0)}
+                {formatDuration(elapsedSeconds)}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #9ca3af)', fontFamily: 'var(--font-mono)', marginBottom: '0.25rem' }}>
+                Source: {transcriptionMode === 'webspeech' ? 'Browser Web Speech' : 'Local AI Whisper'}
               </div>
               <button
                 type="button"
@@ -223,12 +385,12 @@ const LiveCallMonitor = ({ header }) => {
       <div>
         {finalResult ? (
           <AnalysisDetails data={finalResult} />
-        ) : update ? (
+        ) : (status === 'live' || status === 'stopping' || update) ? (
           <div className="glass-panel" style={{ padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
               <h3 style={{ margin: 0 }}>Live Risk</h3>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem' }}>
-                {update.risk_raw.toFixed(2)} — {update.label}
+                {update ? `${update.risk_raw.toFixed(2)} — ${update.label}` : "0.10 — SAFE"}
               </span>
             </div>
             <div style={{
@@ -241,12 +403,12 @@ const LiveCallMonitor = ({ header }) => {
               fontSize: '0.9rem',
               lineHeight: 1.6,
             }}>
-              <span>{update.transcript_committed}</span>
+              <span>{update ? update.transcript_committed : ""}</span>
               {/* Partial tail may still be revised next cycle -> styled as tentative */}
               <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                {update.transcript_partial}
+                {update ? update.transcript_partial : ""}
               </span>
-              {!update.transcript_committed && !update.transcript_partial && (
+              {(!update || (!update.transcript_committed && !update.transcript_partial)) && (
                 <span style={{ color: 'var(--text-muted)' }}>Listening…</span>
               )}
             </div>

@@ -161,3 +161,158 @@ class RAGQueryEngine:
             "explanation": explanation,
             "advisories": advisories
         }
+
+    @classmethod
+    def evaluate_incremental(cls, transcript: str, prior_questions: List[str] = None) -> Dict[str, Any]:
+        """
+        Retrieves advisories and prompts Qwen to perform an incremental audit on the live transcript.
+        Evaluates risk score, categories, safe actions, suggested questions, and evasion verdict.
+        """
+        # 1. Retrieve advisories
+        advisories = cls.query_advisories(transcript, n_results=2)
+        context_str = ""
+        for i, adv in enumerate(advisories):
+            context_str += f"\nAdvisory {i+1} [{adv.source}]: {adv.title}\nDescription: {adv.description}\n"
+
+        # 2. Check OpenRouter configuration
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        model_name = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+
+        if not api_key or "your_openrouter" in api_key.lower():
+            return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
+
+        # 3. Setup OpenRouter API prompt
+        prior_str = json.dumps(prior_questions or [])
+        system_prompt = (
+            "You are an AI Scam Auditor. Analyze this live, incomplete, mixed two-speaker transcript.\n"
+            "Evaluate whether it matches any patterns in the regulatory advisories.\n\n"
+            "### REGULATORY ADVISORIES CONTEXT:\n"
+            f"{context_str or 'No relevant advisories found.'}\n\n"
+            "### RECENTLY SUGGESTED VERIFICATION QUESTIONS:\n"
+            f"{prior_str}\n\n"
+            "### OUTPUT FORMAT INSTRUCTIONS:\n"
+            "You must return your analysis strictly in raw JSON format. No markdown fences. Keys:\n"
+            "{\n"
+            '  "risk_score": <float between 0.0 and 1.0 representing threat level>,\n'
+            '  "label": <"SAFE" | "SUSPICIOUS" | "SCAM">,\n'
+            '  "scam_category": <string>,\n'
+            '  "explanation": <string>,\n'
+            '  "red_flags": [<string red flag chips detected in transcript>],\n'
+            '  "suggested_questions": [<string suggested identity-verification questions for the user to ask the caller, max 3. Only if risk is medium. exit-oriented like calling official number back, written notice from official email. Never bait.>],\n'
+            '  "safe_actions": [<string actions for user safety, e.g. Do NOT share OTP, Do NOT install remote control apps. Only if risk is high.>],\n'
+            '  "question_response_verdict": <"EVASIVE" | "REFUSED" | "THREATENED" | "PLAUSIBLE" | "NOT_YET_ANSWERED" | "N/A">\n'
+            "}"
+        )
+
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+            default_headers={
+                "HTTP-Referer": "https://github.com/VishudhaSood/AI-Scam-Detection",
+                "X-Title": "AI Scam Guard Platform"
+            }
+        )
+
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Audit this live transcript:\n\"\"\"\n{transcript}\n\"\"\""}
+                ],
+                temperature=0.1
+            )
+            response_text = response.choices[0].message.content.strip()
+            
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                response_text = "\n".join(lines).strip()
+
+            result = json.loads(response_text)
+            result["advisories"] = advisories
+            return result
+        except Exception as e:
+            logger.error(f"Error in evaluate_incremental OpenRouter: {e}")
+            return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
+
+    @classmethod
+    def _get_fallback_mock_incremental(cls, transcript: str, prior_questions: List[str], advisories: List[Advisory]) -> Dict[str, Any]:
+        """
+        Milestone 8 Incremental Heuristic Fallback
+        """
+        text_lower = transcript.lower()
+        risk_score = 0.10
+        label = "SAFE"
+        category = "None"
+        explanation = "Conversation appears normal. No scam indicators detected. (Fallback)"
+        red_flags = []
+        suggested_questions = []
+        safe_actions = []
+        verdict = "N/A"
+
+        # Determine scam match
+        is_scam = False
+        if any(kw in text_lower for kw in ["lottery", "prize", "win", "crore", "lakh"]):
+            risk_score = 0.60
+            label = "SUSPICIOUS"
+            category = "Lottery & Prize Scam"
+            explanation = "Urgent demands or congratulatory announcements of winnings. (Fallback)"
+            red_flags = ["Lottery winnings announced", "Advance fee processing demand"]
+            suggested_questions = [
+                "Ask which official website registry lists your ticket number.",
+                "Say you will only verify the prize via the official government portal."
+            ]
+            is_scam = True
+        elif any(kw in text_lower for kw in ["otp", "bank", "manager", "kyc", "card blocked"]):
+            risk_score = 0.70
+            label = "SUSPICIOUS"
+            category = "Bank Impersonation (KYC)"
+            explanation = "Suspicious card blockage warning or OTP request. (Fallback)"
+            red_flags = ["Demanded credentials or OTP", "KYC update urgency"]
+            suggested_questions = [
+                "Ask for their employee ID and main branch department name.",
+                "Tell them you will hang up and call the official customer care number on your card."
+            ]
+            is_scam = True
+        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband", "warrant"]):
+            risk_score = 0.72
+            label = "SUSPICIOUS"
+            category = "Law Enforcement Impersonation"
+            explanation = "Threats of arrest warrant or custom violation intercepts. (Fallback)"
+            red_flags = ["Arrest warrant threats", "Coercion into secrecy"]
+            suggested_questions = [
+                "Ask which official police station is issuing this warrant and their ID.",
+                "Say you will call back the main police control room to verify their identity."
+            ]
+            is_scam = True
+
+        if is_scam:
+            # Check for evasion/refusal in transcript tail
+            # If the user has prior questions and the scammer refuses/threatens
+            if prior_questions:
+                if any(kw in text_lower for kw in ["no", "why", "refuse", "not telling", "don't ask", "shut up", "don't tell"]):
+                    verdict = "EVASIVE"
+                    risk_score = min(0.98, risk_score + 0.20)
+                    label = "SCAM"
+                    safe_actions = ["Do NOT share any OTP code.", "Do NOT transfer any processing fees.", "Hang up the call immediately."]
+                    suggested_questions = [] # Clear questions in DANGER
+                else:
+                    verdict = "NOT_YET_ANSWERED"
+            else:
+                verdict = "NOT_YET_ANSWERED"
+
+        return {
+            "risk_score": risk_score,
+            "label": label,
+            "scam_category": category,
+            "explanation": explanation,
+            "red_flags": red_flags,
+            "suggested_questions": suggested_questions,
+            "safe_actions": safe_actions,
+            "question_response_verdict": verdict,
+            "advisories": advisories
+        }
