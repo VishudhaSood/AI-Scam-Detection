@@ -11,6 +11,7 @@ const LiveCallMonitor = ({ header }) => {
   const [update, setUpdate] = useState(null);       // latest LiveUpdate from server
   const [finalResult, setFinalResult] = useState(null); // LiveFinal (renders via AnalysisDetails)
   const [error, setError] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   // Mutable machinery lives in refs: changing these must not re-render the UI
   const wsRef = useRef(null);
@@ -37,10 +38,28 @@ const LiveCallMonitor = ({ header }) => {
     };
   }, []);
 
+  // Smooth UI timer ticking every second during live monitoring
+  useEffect(() => {
+    let timerId = null;
+    if (status === 'live') {
+      timerId = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else if (status === 'idle' || status === 'connecting') {
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (timerId) {
+        clearInterval(timerId);
+      }
+    };
+  }, [status]);
+
   const startMonitoring = async () => {
     setError(null);
     setUpdate(null);
     setFinalResult(null);
+    setElapsedSeconds(0);
 
     let stream;
     try {
@@ -169,7 +188,7 @@ const LiveCallMonitor = ({ header }) => {
                 </span>
               </div>
               <div style={{ fontSize: '2.5rem', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                {formatDuration(update ? update.elapsed_s : 0)}
+                {formatDuration(elapsedSeconds)}
               </div>
               <button
                 type="button"
@@ -223,12 +242,12 @@ const LiveCallMonitor = ({ header }) => {
       <div>
         {finalResult ? (
           <AnalysisDetails data={finalResult} />
-        ) : update ? (
+        ) : (status === 'live' || status === 'stopping' || update) ? (
           <div className="glass-panel" style={{ padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
               <h3 style={{ margin: 0 }}>Live Risk</h3>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem' }}>
-                {update.risk_raw.toFixed(2)} — {update.label}
+                {update ? `${update.risk_raw.toFixed(2)} — ${update.label}` : "0.10 — SAFE"}
               </span>
             </div>
             <div style={{
@@ -241,12 +260,12 @@ const LiveCallMonitor = ({ header }) => {
               fontSize: '0.9rem',
               lineHeight: 1.6,
             }}>
-              <span>{update.transcript_committed}</span>
+              <span>{update ? update.transcript_committed : ""}</span>
               {/* Partial tail may still be revised next cycle -> styled as tentative */}
               <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                {update.transcript_partial}
+                {update ? update.transcript_partial : ""}
               </span>
-              {!update.transcript_committed && !update.transcript_partial && (
+              {(!update || (!update.transcript_committed && !update.transcript_partial)) && (
                 <span style={{ color: 'var(--text-muted)' }}>Listening…</span>
               )}
             </div>
