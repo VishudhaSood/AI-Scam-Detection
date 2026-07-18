@@ -54,7 +54,9 @@ async def analyze_call(
     response = AnalyzerService.analyze_transcript(analysis_text)
     
     # 4. Compute combined risk and label via Risk Engine
-    combined_risk, final_label = RiskEngine.calculate_combined_risk(deepfake_prob, response.risk_score)
+    combined_risk, final_label = RiskEngine.calculate_combined_risk(
+        deepfake_prob, response.risk_score, is_text_only=(file is None)
+    )
     
     # Update response object with unified metrics
     response.risk_score = combined_risk
