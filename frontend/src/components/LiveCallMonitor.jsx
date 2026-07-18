@@ -15,22 +15,29 @@ const LiveCallMonitor = ({ header }) => {
 
   // Mutable machinery lives in refs: changing these must not re-render the UI
   const wsRef = useRef(null);
-  const recorderRef = useRef(null);
-  const streamRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const statusRef = useRef(status);
+
+  // Track accumulated and current session committed transcripts across silence-induced restarts
+  const accumulatedCommittedRef = useRef('');
+  const currentSessionCommittedRef = useRef('');
+
+  // Sync status to ref to access it cleanly in async callbacks without closures issues
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const releaseMic = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
     }
   };
 
   // Safety net: leaving the tab/page mid-session must free the mic and socket
   useEffect(() => {
     return () => {
-      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-        recorderRef.current.stop();
-      }
       releaseMic();
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
@@ -61,15 +68,16 @@ const LiveCallMonitor = ({ header }) => {
     setFinalResult(null);
     setElapsedSeconds(0);
 
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      console.error('Microphone access failed:', err);
-      setError('Could not access microphone. Please check permissions and try again.');
+    // Clear the accumulated transcripts for a fresh session
+    accumulatedCommittedRef.current = '';
+    currentSessionCommittedRef.current = '';
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setError('Web Speech API is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
       return;
     }
-    streamRef.current = stream;
+
     setStatus('connecting');
 
     const ws = new WebSocket(WS_URL);
@@ -79,28 +87,64 @@ const LiveCallMonitor = ({ header }) => {
       // Protocol: the first frame must be the JSON "start" control message
       ws.send(JSON.stringify({ type: 'start', caller_number: callerNumber.trim() || null }));
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      recorderRef.current = recorder;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US'; // Lock language to English for clean transcription
+      recognitionRef.current = recognition;
 
-      recorder.ondataavailable = (e) => {
-        // One continuous recorder => only chunk #1 carries the webm header,
-        // so the server can byte-append chunks into a single valid file.
-        if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          ws.send(e.data);
+      recognition.onresult = (event) => {
+        let sessionCommittedText = '';
+        let partialText = '';
+
+        for (let i = 0; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            sessionCommittedText += result[0].transcript + ' ';
+          } else {
+            partialText += result[0].transcript;
+          }
         }
-      };
 
-      recorder.onstop = () => {
-        // dataavailable (final flush) is guaranteed to fire before onstop,
-        // so by now every chunk is on the wire and "end" can go out safely.
+        // Keep track of what has been finalized in this session segment
+        currentSessionCommittedRef.current = sessionCommittedText;
+
+        // Combine previously accumulated text with the current session segment's text
+        const totalCommitted = (accumulatedCommittedRef.current + ' ' + sessionCommittedText).trim();
+
+        // Stream the accumulated text chunks to the backend
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'end' }));
+          ws.send(JSON.stringify({
+            type: 'text_chunk',
+            transcript_committed: totalCommitted,
+            transcript_partial: partialText.trim()
+          }));
         }
-        releaseMic();
       };
 
-      recorder.start(CHUNK_MS);
+      recognition.onend = () => {
+        // Save the final committed text from the ended segment into the accumulator
+        accumulatedCommittedRef.current = (accumulatedCommittedRef.current + ' ' + currentSessionCommittedRef.current).trim();
+        currentSessionCommittedRef.current = '';
+
+        // Auto-restart recognition if we are still live (handles long silences)
+        if (statusRef.current === 'live') {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.error('Failed to restart speech recognition:', e);
+          }
+        }
+      };
+
+      recognition.onerror = (e) => {
+        console.error('Speech recognition error:', e.error);
+        if (e.error === 'not-allowed') {
+          setError('Microphone permission blocked. Please allow mic access in your browser settings.');
+        }
+      };
+
+      recognition.start();
       setStatus('live');
     };
 
@@ -127,8 +171,9 @@ const LiveCallMonitor = ({ header }) => {
 
   const stopMonitoring = () => {
     setStatus('stopping');
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop(); // triggers final flush -> "end" -> server "final"
+    releaseMic();
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'end' }));
     }
   };
 

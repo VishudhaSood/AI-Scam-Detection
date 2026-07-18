@@ -41,17 +41,17 @@ class WhisperService:
     def _get_model(cls, force_cpu=False):
         with cls._model_lock:
             if force_cpu:
-                cls._model = WhisperModel("base", device="cpu", compute_type="int8")
+                cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
                 cls._device = "cpu"
                 return cls._model
 
             if cls._model is None:
                 try:
-                    cls._model = WhisperModel("base", device="cuda", compute_type="float16")
+                    cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
                     cls._device = "cuda"
                 except Exception as e:
                     print(f"Failed to load CUDA model ({e}), loading on CPU...")
-                    cls._model = WhisperModel("base", device="cpu", compute_type="int8")
+                    cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
                     cls._device = "cpu"
             return cls._model
 

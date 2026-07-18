@@ -55,16 +55,16 @@ class StreamingTranscriber:
         with cls._model_lock:
             if cls._model is None:
                 try:
-                    # Attempt to load base model on CUDA
-                    cls._model = WhisperModel("base", device="cuda", compute_type="float16")
+                    # Attempt to load tiny model on CUDA
+                    cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
                     cls._device = "cuda"
-                    print("Loaded Whisper base model on CUDA.")
+                    print("Loaded Whisper tiny model on CUDA.")
                 except Exception as e:
                     print(f"Failed to load Whisper on CUDA ({e}), falling back to CPU...")
                     # Fallback to CPU with int8 quantization
-                    cls._model = WhisperModel("base", device="cpu", compute_type="int8")
+                    cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
                     cls._device = "cpu"
-                    print("Loaded Whisper base model on CPU.")
+                    print("Loaded Whisper tiny model on CPU.")
         return cls._model
 
     @classmethod

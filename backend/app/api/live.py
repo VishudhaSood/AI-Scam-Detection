@@ -91,6 +91,13 @@ async def live_monitor(websocket: WebSocket):
                 message = json.loads(frame["text"])
                 if message.get("type") == "end":
                     break
+                elif message.get("type") == "text_chunk":
+                    raw = await session.process_text_cycle(
+                        message.get("transcript_committed", ""),
+                        message.get("transcript_partial", "")
+                    )
+                    last_update = LiveUpdate.model_validate(raw)
+                    await websocket.send_text(last_update.model_dump_json())
     except WebSocketDisconnect:
         client_connected = False
     finally:
