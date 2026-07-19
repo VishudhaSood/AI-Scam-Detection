@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import AnalysisDetails from './AnalysisDetails';
+import RiskGauge from './RiskGauge';
+import CoachPanel from './CoachPanel';
 
 const WS_URL = 'ws://127.0.0.1:8000/api/v1/ws/live';
 const CHUNK_MS = 5000; // MediaRecorder timeslice: one binary frame every 5s
@@ -205,6 +207,10 @@ const LiveCallMonitor = ({ header }) => {
       const msg = JSON.parse(event.data);
       if (msg.type === 'update') {
         setUpdate(msg);
+        // Server clock is authoritative: snap the local 1s ticker to elapsed_s
+        // only on real drift (>2s), so it keeps ticking smoothly in between
+        const serverElapsed = Math.round(msg.elapsed_s);
+        setElapsedSeconds((prev) => (Math.abs(prev - serverElapsed) > 2 ? serverElapsed : prev));
       } else if (msg.type === 'final') {
         setFinalResult(msg);
         setStatus('ended');
@@ -386,31 +392,57 @@ const LiveCallMonitor = ({ header }) => {
         {finalResult ? (
           <AnalysisDetails data={finalResult} />
         ) : (status === 'live' || status === 'stopping' || update) ? (
-          <div className="glass-panel" style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0 }}>Live Risk</h3>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem' }}>
-                {update ? `${update.risk_raw.toFixed(2)} — ${update.label}` : "0.10 — SAFE"}
-              </span>
+          <div className="results-container">
+            {/* Live threat header: smoothed (ratcheted) score drives the gauge */}
+            <div className="glass-panel score-header-box">
+              <RiskGauge score={update ? update.risk_smoothed : 0} />
+              <div className="risk-level-card">
+                <h2>Live Threat Level</h2>
+                <span className={`risk-badge ${update && update.label === 'SCAM' ? 'scam' : update && update.label === 'SUSPICIOUS' ? 'suspicious' : 'safe'}`}>
+                  {update ? update.label : 'SAFE'}
+                </span>
+                <div className="metrics-row">
+                  <div className="metric-tile">
+                    <p>Confidence</p>
+                    <span>{update ? Math.round(update.confidence * 100) : 0}%</span>
+                  </div>
+                  <div className="metric-tile scam-label">
+                    <p>Category</p>
+                    <span style={{ fontSize: '0.9rem' }}>{update ? update.scam_category : 'None'}</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div style={{
-              background: 'rgba(0,0,0,0.25)',
-              borderRadius: '0.5rem',
-              padding: '1rem',
-              minHeight: '12rem',
-              maxHeight: '24rem',
-              overflowY: 'auto',
-              fontSize: '0.9rem',
-              lineHeight: 1.6,
-            }}>
-              <span>{update ? update.transcript_committed : ""}</span>
-              {/* Partial tail may still be revised next cycle -> styled as tentative */}
-              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                {update ? update.transcript_partial : ""}
-              </span>
-              {(!update || (!update.transcript_committed && !update.transcript_partial)) && (
-                <span style={{ color: 'var(--text-muted)' }}>Listening…</span>
-              )}
+
+            {/* Coach card: mode banner, questions/actions, red flags */}
+            <CoachPanel update={update} />
+
+            <div className="glass-panel" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0 }}>Live Transcript</h3>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  {update ? `raw ${update.risk_raw.toFixed(2)} · smoothed ${update.risk_smoothed.toFixed(2)}` : 'raw 0.00 · smoothed 0.00'}
+                </span>
+              </div>
+              <div style={{
+                background: 'rgba(0,0,0,0.25)',
+                borderRadius: '0.5rem',
+                padding: '1rem',
+                minHeight: '12rem',
+                maxHeight: '24rem',
+                overflowY: 'auto',
+                fontSize: '0.9rem',
+                lineHeight: 1.6,
+              }}>
+                <span>{update ? update.transcript_committed : ""}</span>
+                {/* Partial tail may still be revised next cycle -> styled as tentative */}
+                <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  {update ? update.transcript_partial : ""}
+                </span>
+                {(!update || (!update.transcript_committed && !update.transcript_partial)) && (
+                  <span style={{ color: 'var(--text-muted)' }}>Listening…</span>
+                )}
+              </div>
             </div>
           </div>
         ) : (

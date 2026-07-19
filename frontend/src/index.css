@@ -526,6 +526,122 @@ body {
   opacity: 0.3;
 }
 
+/* Live Coach Panel (M8) */
+.coach-card {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.coach-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  transition: var(--transition-smooth);
+}
+
+.coach-banner.monitor {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.coach-banner.verify {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.coach-banner.danger {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.4);
+  animation: pulse-border 2s infinite;
+}
+
+.coach-mode-chip {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 0.25rem 0.6rem;
+  border-radius: 1rem;
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.coach-banner.monitor .coach-mode-chip {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-safe);
+}
+
+.coach-banner.verify .coach-mode-chip {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--color-suspicious);
+}
+
+.coach-banner.danger .coach-mode-chip {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-scam);
+}
+
+.coach-title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.2rem;
+}
+
+.coach-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.coach-list {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.coach-list li {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.coach-fallback {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.red-flag-heading {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.red-flag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.red-flag-chip {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-scam);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+}
+
 /* Keyframes animations */
 @keyframes spin {
   0% { transform: rotate(0deg); }
