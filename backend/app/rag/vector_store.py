@@ -70,24 +70,53 @@ class FallbackCollection:
         self.data = list(id_map.values())
         self._save()
 
+    # Filler words that would otherwise dominate the word-overlap score and
+    # make benign small talk "match" advisories through shared stopwords.
+    STOPWORDS = {
+        "a", "an", "the", "and", "or", "but", "if", "then", "is", "are", "was",
+        "were", "be", "been", "to", "of", "in", "on", "at", "for", "from",
+        "with", "by", "as", "it", "its", "this", "that", "these", "those",
+        "i", "you", "he", "she", "we", "they", "your", "my", "his", "her",
+        "our", "their", "me", "him", "them", "us", "do", "does", "did", "not",
+        "no", "yes", "have", "has", "had", "will", "would", "can", "could",
+        "should", "shall", "may", "might", "there", "here", "what", "which",
+        "who", "how", "when", "where", "why", "all", "any", "so", "just",
+        "please", "now", "today", "very", "am", "pm", "up", "out", "about"
+    }
+
+    @classmethod
+    def _meaningful_words(cls, text: str) -> set:
+        words = set()
+        for raw in text.lower().split():
+            w = raw.strip('.,!?;:"()[]')
+            if w and w not in cls.STOPWORDS:
+                words.add(w)
+        return words
+
     def query(self, query_texts, n_results=2):
         if not query_texts or not self.data:
-            return {"metadatas": [[]]}
-        
-        query = query_texts[0].lower()
-        query_words = set(query.split())
-        
+            return {"metadatas": [[]], "distances": [[]]}
+
+        query_words = self._meaningful_words(query_texts[0])
+
         scored_items = []
         for item in self.data:
-            doc_words = set(item["document"].lower().split())
+            doc_words = self._meaningful_words(item["document"])
             intersection = query_words.intersection(doc_words)
             union = query_words.union(doc_words)
             score = len(intersection) / len(union) if union else 0.0
-            scored_items.append((score, item["metadata"]))
-            
+            # One shared meaningful word is noise, not a topical match
+            if len(intersection) >= 2:
+                scored_items.append((score, item["metadata"]))
+
         scored_items.sort(key=lambda x: x[0], reverse=True)
-        results = [meta for _, meta in scored_items[:n_results]]
-        return {"metadatas": [results]}
+        top = scored_items[:n_results]
+        # Report distances (1 - similarity) so upstream threshold checks see
+        # real values instead of defaulting to a perfect 0.0 match.
+        return {
+            "metadatas": [[meta for _, meta in top]],
+            "distances": [[round(1.0 - score, 4) for score, _ in top]],
+        }
 
 class VectorStoreManager:
     """

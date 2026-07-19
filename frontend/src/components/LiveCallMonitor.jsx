@@ -25,6 +25,7 @@ const LiveCallMonitor = ({ header }) => {
   const processorRef = useRef(null);
   const statusRef = useRef(status);
   const dfIntervalRef = useRef(null);
+  const pcmFlushIntervalRef = useRef(null);
 
   // Smoothed deepfake signal — EMA with alpha=0.25 to dampen jitter between WebSocket cycles
   const smoothedDeepfakeRef = useRef(null);
@@ -60,6 +61,10 @@ const LiveCallMonitor = ({ header }) => {
     if (dfIntervalRef.current) {
       clearInterval(dfIntervalRef.current);
       dfIntervalRef.current = null;
+    }
+    if (pcmFlushIntervalRef.current) {
+      clearInterval(pcmFlushIntervalRef.current);
+      pcmFlushIntervalRef.current = null;
     }
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop();
@@ -124,13 +129,27 @@ const LiveCallMonitor = ({ header }) => {
     const processor = audioContext.createScriptProcessor(4096, 1, 1);
     processorRef.current = processor;
 
+    // Batch PCM locally and flush every CHUNK_MS. Sending each 4096-sample
+    // frame (~4 per second) forces a full server transcription cycle per frame,
+    // which drowns CPU Whisper and stalls the transcript entirely.
+    const pcmQueue = [];
     processor.onaudioprocess = (e) => {
-      const inputData = e.inputBuffer.getChannelData(0); // Float32Array (4096 samples at 16kHz)
-      if (ws.readyState === WebSocket.OPEN) {
-        // Send raw PCM float32 bytes
-        ws.send(inputData.buffer);
-      }
+      // Copy: the underlying buffer is reused by the audio thread
+      pcmQueue.push(new Float32Array(e.inputBuffer.getChannelData(0)));
     };
+
+    pcmFlushIntervalRef.current = setInterval(() => {
+      if (pcmQueue.length === 0 || ws.readyState !== WebSocket.OPEN) return;
+      const total = pcmQueue.reduce((sum, c) => sum + c.length, 0);
+      const merged = new Float32Array(total);
+      let offset = 0;
+      for (const c of pcmQueue) {
+        merged.set(c, offset);
+        offset += c.length;
+      }
+      pcmQueue.length = 0;
+      ws.send(merged.buffer);
+    }, CHUNK_MS);
 
     source.connect(processor);
     processor.connect(audioContext.destination);

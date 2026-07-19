@@ -45,6 +45,14 @@ class LiveSession:
         self.llm_safe_actions = []
         self.llm_advisories = []
         self.llm_verdict = "N/A"
+        self.llm_explanation = ""
+
+        # Sticky coach guidance: consecutive audits may return empty lists
+        # (e.g. the fallback clears them once pending questions reset), which
+        # made the UI flicker between guidance and its absence. Once issued,
+        # guidance survives until the mode gates it out.
+        self.sticky_questions = []
+        self.sticky_safe_actions = []
 
         # AASIST Deepfake detection state
         self.last_deepfake_result = DeepfakeResult(
@@ -206,9 +214,16 @@ class LiveSession:
         else:
             label = "SAFE"
 
-        # Suggested questions only visible in VERIFY mode; safe actions in DANGER
-        suggested_questions = self.llm_suggested_questions if mode == "VERIFY" else []
-        safe_actions = self.llm_safe_actions if mode == "DANGER" else []
+        # Suggested questions only visible in VERIFY mode; safe actions in DANGER.
+        # Sticky caches keep the last non-empty guidance so an audit that returns
+        # empty lists doesn't blank (and un-blank) the coach panel between cycles.
+        if self.llm_suggested_questions:
+            self.sticky_questions = self.llm_suggested_questions
+        if self.llm_safe_actions:
+            self.sticky_safe_actions = self.llm_safe_actions
+
+        suggested_questions = (self.llm_suggested_questions or self.sticky_questions) if mode == "VERIFY" else []
+        safe_actions = (self.llm_safe_actions or self.sticky_safe_actions) if mode == "DANGER" else []
 
         elapsed_s = int(time.time() - self.start_time)
         

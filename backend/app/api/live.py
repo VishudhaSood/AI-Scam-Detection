@@ -82,23 +82,30 @@ async def live_monitor(websocket: WebSocket):
             frame = await websocket.receive()
             if frame.get("bytes") is not None:
                 chunk = frame["bytes"]
-                # Detect 0xDF-tagged audio-only frames (from webspeech hybrid mode).
-                # These are WebM chunks sent purely for AASIST deepfake analysis —
-                # Whisper is NOT run on them since Web Speech already handles the transcript.
-                if len(chunk) > 1 and chunk[0] == 0xDF:
-                    audio_bytes = chunk[1:]  # strip the magic byte
-                    if hasattr(session, "process_audio_only"):
-                        await session.process_audio_only(audio_bytes)
-                        # Re-run the risk evaluation cycle with the current transcript text to update
-                        # all fused risk scores and deepfake statistics.
-                        raw = await session.process_text_cycle(session.committed_text, session.partial_text)
+                # A malformed audio frame must be dropped, never end the session
+                try:
+                    # Detect 0xDF-tagged audio-only frames (from webspeech hybrid mode).
+                    # These are WebM chunks sent purely for AASIST deepfake analysis —
+                    # Whisper is NOT run on them since Web Speech already handles the transcript.
+                    # The tag alone is not enough: a raw float32 PCM frame from Whisper mode
+                    # has a 1/256 chance of starting with 0xDF, so also require the WebM EBML
+                    # header that every standalone recorder blob begins with.
+                    if len(chunk) > 5 and chunk[0] == 0xDF and chunk[1:5] == b"\x1a\x45\xdf\xa3":
+                        audio_bytes = chunk[1:]  # strip the magic byte
+                        if hasattr(session, "process_audio_only"):
+                            await session.process_audio_only(audio_bytes)
+                            # Re-run the risk evaluation cycle with the current transcript text to update
+                            # all fused risk scores and deepfake statistics.
+                            raw = await session.process_text_cycle(session.committed_text, session.partial_text)
+                            last_update = LiveUpdate.model_validate(raw)
+                            await websocket.send_text(last_update.model_dump_json())
+                    else:
+                        # Normal Whisper mode: full cycle (STT + AASIST + risk fusion)
+                        raw = await session.process_cycle(chunk)
                         last_update = LiveUpdate.model_validate(raw)
                         await websocket.send_text(last_update.model_dump_json())
-                else:
-                    # Normal Whisper mode: full cycle (STT + AASIST + risk fusion)
-                    raw = await session.process_cycle(chunk)
-                    last_update = LiveUpdate.model_validate(raw)
-                    await websocket.send_text(last_update.model_dump_json())
+                except Exception as e:
+                    logger.error(f"Dropped malformed binary frame ({len(chunk)} bytes): {e}")
             elif frame.get("text") is not None:
                 message = json.loads(frame["text"])
                 if message.get("type") == "end":

@@ -55,16 +55,30 @@ class WhisperReasoningProvider(EvidenceProvider):
                 session.llm_suggested_questions = audit_result.get("suggested_questions", [])
                 session.llm_safe_actions = audit_result.get("safe_actions", [])
                 session.llm_advisories = audit_result.get("advisories", [])
-                session.llm_verdict = audit_result.get("question_response_verdict", "N/A")
-                
+                session.llm_explanation = audit_result.get("explanation", "")
+
+                # A hostile/evasive reaction is a fact about this call: keep it
+                # until the caller redeems themselves with a PLAUSIBLE answer.
+                # Audits that ran with no pending questions return N/A or
+                # NOT_YET_ANSWERED and must not erase an earlier bad verdict
+                # (that erasure made risk and safe_actions oscillate every cycle).
+                new_verdict = audit_result.get("question_response_verdict", "N/A")
+                if (new_verdict in ["EVASIVE", "REFUSED", "THREATENED", "PLAUSIBLE"]
+                        or session.llm_verdict not in ["EVASIVE", "REFUSED", "THREATENED"]):
+                    session.llm_verdict = new_verdict
+
                 session.pending_questions = session.llm_suggested_questions
             except Exception as e:
                 print(f"Error in WhisperReasoningProvider evaluate: {e}")
 
         # Compute confidence: base confidence on whether any audits have run
         confidence = 1.0 if session.llm_audits_done > 0 else 0.0
-        
-        explanation = f"Qwen LLM analyzed transcript content. Category: {session.llm_scam_category}."
+
+        # Surface the audit's own explanation: the offline fallback tags itself
+        # "[FALLBACK MOCK ANALYSIS - NO LIVE LLM]", so the trace stays honest
+        # about which engine actually produced the verdict.
+        explanation = getattr(session, "llm_explanation", "") or \
+            f"LLM transcript audit. Category: {session.llm_scam_category}."
         if session.llm_red_flags:
             explanation += f" Detected flags: {', '.join(session.llm_red_flags)}."
 

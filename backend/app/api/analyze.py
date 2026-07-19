@@ -6,7 +6,7 @@ from app.models.schemas import AnalysisResponse, EvidenceBreakdown
 from app.services.analyzer import AnalyzerService
 from app.services.whisper_service import WhisperService
 from app.services.deepfake_detector import AASISTDetector, DeepfakeResult
-from app.services.risk_engine import EvidenceFusionEngine
+from app.services.risk_engine import EvidenceFusionEngine, AdaptiveRiskEngine
 from app.services.heuristic_scorer import HeuristicScorer
 from app.database.connection import get_db
 from app.database import crud
@@ -34,7 +34,8 @@ async def analyze_call(
 
     # 2. Extract or Transcribe Audio & Run AASIST Deepfake Detector
     analysis_text = ""
-    
+    content = None
+
     if file:
         # Check the file extension just to ensure it's a valid media format
         filename = file.filename.lower()
@@ -79,6 +80,9 @@ async def analyze_call(
             self.last_deepfake_result = df_result
             self.last_audit_word_count = len(analysis_text.split())
             self.last_llm_audit_time = 0.0
+            # The orchestrator's session path runs the stateful engine; a fresh
+            # one on its first cycle passes the fused score through unchanged
+            self.risk_engine = AdaptiveRiskEngine()
 
     temp_session = TempSession()
     
