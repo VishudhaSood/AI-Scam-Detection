@@ -40,13 +40,19 @@ class RAGQueryEngine:
             advisories = []
             if results and "metadatas" in results and results["metadatas"]:
                 metadata_list = results["metadatas"][0]
-                for meta in metadata_list:
-                    advisories.append(Advisory(
-                        title=meta.get("title", "Unknown Advisory"),
-                        source=meta.get("source", "Unknown"),
-                        description=meta.get("description", "No details available."),
-                        url=meta.get("url", None)
-                    ))
+                distances = results.get("distances", [[]])[0] if "distances" in results and results["distances"] else []
+                
+                for i, meta in enumerate(metadata_list):
+                    dist = distances[i] if i < len(distances) else 0.0
+                    
+                    # Threshold check: ignore documents with distance > 1.25 (weak match)
+                    if dist <= 1.25:
+                        advisories.append(Advisory(
+                            title=meta.get("title", "Unknown Advisory"),
+                            source=meta.get("source", "Unknown"),
+                            description=meta.get("description", "No details available."),
+                            url=meta.get("url", None)
+                        ))
             return advisories
         except Exception as e:
             logger.error(f"Error querying ChromaDB vector store: {e}")
@@ -106,19 +112,12 @@ class RAGQueryEngine:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Audit this call transcript:\n\"\"\"\n{transcript}\n\"\"\""}
                 ],
-                temperature=0.1
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                timeout=15.0
             )
 
             response_text = response.choices[0].message.content.strip()
-            
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                response_text = "\n".join(lines).strip()
-
             result = json.loads(response_text)
             result["advisories"] = advisories
             return result
@@ -137,22 +136,22 @@ class RAGQueryEngine:
             risk_score = 0.90
             label = "SCAM"
             category = "Lottery & Prize Scam"
-            explanation = "Conversation contains lottery winnings urgency markers. Caller demands processing fees. (Fallback Analysis)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Conversation contains lottery winnings urgency markers. Caller demands processing fees."
         elif any(kw in text_lower for kw in ["otp", "bank", "manager", "kyc", "card blocked"]):
             risk_score = 0.95
             label = "SCAM"
             category = "Bank Impersonation (KYC/OTP)"
-            explanation = "Urgent demands for banking credentials or KYC updates detected. (Fallback Analysis)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Urgent demands for banking credentials or KYC updates detected."
         elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband"]):
             risk_score = 0.93
             label = "SCAM"
             category = "Impersonation of Law Enforcement"
-            explanation = "Threats of arrest related to illegal packages or police warrants. (Fallback Analysis)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest related to illegal packages or police warrants."
         else:
             risk_score = 0.10
             label = "SAFE"
             category = "None"
-            explanation = "Conversation is evaluated as safe. No urgency signals or known scam triggers. (Fallback Analysis)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Conversation is evaluated as safe. No urgency signals or known scam triggers."
 
         return {
             "risk_score": risk_score,
@@ -185,21 +184,40 @@ class RAGQueryEngine:
         prior_str = json.dumps(prior_questions or [])
         system_prompt = (
             "You are an AI Scam Auditor. Analyze this live, incomplete, mixed two-speaker transcript.\n"
-            "Evaluate whether it matches any patterns in the regulatory advisories.\n\n"
+            "Evaluate whether it matches any warning patterns in the regulatory advisories.\n\n"
+            "### TRANSCRIPT NOISE GUIDELINE:\n"
+            "The transcript is generated in real-time by a local speech-to-text model on a speakerphone conversation.\n"
+            "It will contain transcription noise, typos, missing punctuation, and grammatical mistakes.\n"
+            "Evaluate the high-level social engineering, coercion, or fraud patterns, NOT the verbatim wording.\n\n"
             "### REGULATORY ADVISORIES CONTEXT:\n"
             f"{context_str or 'No relevant advisories found.'}\n\n"
             "### RECENTLY SUGGESTED VERIFICATION QUESTIONS:\n"
             f"{prior_str}\n\n"
+            "### VERIFICATION QUESTION GENERATION RULES:\n"
+            "If the conversation matches a SUSPICIOUS classification, you may suggest up to 3 identity-verification questions for the user to ask the caller.\n"
+            "Rules for questions:\n"
+            "- They must be exit-oriented (e.g. ask for official ID and state they will hang up and call the official organization back).\n"
+            "- They must NEVER suggest baiting, mock interactions, or prolonging the scammer's call.\n"
+            "- If the conversation is SAFE or already confirmed as a SCAM, do not suggest questions.\n\n"
+            "### QUESTION-RESPONSE VERDICT GUIDELINES:\n"
+            "Analyze the tail of the transcript to check how the caller reacted to any previously suggested questions (listed under RECENTLY SUGGESTED VERIFICATION QUESTIONS).\n"
+            "Classify the caller's reaction into exactly one of these labels:\n"
+            "- \"EVASIVE\": Caller avoided answering, changed the subject, or responded with vague/suspicious excuses.\n"
+            "- \"REFUSED\": Caller directly refused to answer or verify their identity.\n"
+            "- \"THREATENED\": Caller responded with hostility, anger, threats of arrest, fines, or account blockages.\n"
+            "- \"PLAUSIBLE\": Caller answered the questions cooperatively and logically (e.g. agreed to send an official verification email).\n"
+            "- \"NOT_YET_ANSWERED\": The questions have not been asked by the user, or the caller has not yet responded in the transcript.\n"
+            "- \"N/A\": No questions have been suggested yet.\n\n"
             "### OUTPUT FORMAT INSTRUCTIONS:\n"
             "You must return your analysis strictly in raw JSON format. No markdown fences. Keys:\n"
             "{\n"
             '  "risk_score": <float between 0.0 and 1.0 representing threat level>,\n'
             '  "label": <"SAFE" | "SUSPICIOUS" | "SCAM">,\n'
-            '  "scam_category": <string>,\n'
-            '  "explanation": <string>,\n'
-            '  "red_flags": [<string red flag chips detected in transcript>],\n'
-            '  "suggested_questions": [<string suggested identity-verification questions for the user to ask the caller, max 3. Only if risk is medium. exit-oriented like calling official number back, written notice from official email. Never bait.>],\n'
-            '  "safe_actions": [<string actions for user safety, e.g. Do NOT share OTP, Do NOT install remote control apps. Only if risk is high.>],\n'
+            '  "scam_category": <string matching the category name, or "None">,\n'
+            '  "explanation": <string explaining the reasoning>,\n'
+            '  "red_flags": [<string red flag indicators detected in the text>],\n'
+            '  "suggested_questions": [<list of strings, max 3, verification questions only>],\n'
+            '  "safe_actions": [<list of strings, defensive guidance for user safety when threat is high>],\n'
             '  "question_response_verdict": <"EVASIVE" | "REFUSED" | "THREATENED" | "PLAUSIBLE" | "NOT_YET_ANSWERED" | "N/A">\n'
             "}"
         )
@@ -220,18 +238,11 @@ class RAGQueryEngine:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Audit this live transcript:\n\"\"\"\n{transcript}\n\"\"\""}
                 ],
-                temperature=0.1
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                timeout=15.0
             )
             response_text = response.choices[0].message.content.strip()
-            
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                response_text = "\n".join(lines).strip()
-
             result = json.loads(response_text)
             result["advisories"] = advisories
             return result
@@ -248,7 +259,7 @@ class RAGQueryEngine:
         risk_score = 0.10
         label = "SAFE"
         category = "None"
-        explanation = "Conversation appears normal. No scam indicators detected. (Fallback)"
+        explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Conversation appears normal. No scam indicators detected."
         red_flags = []
         suggested_questions = []
         safe_actions = []
@@ -260,7 +271,7 @@ class RAGQueryEngine:
             risk_score = 0.60
             label = "SUSPICIOUS"
             category = "Lottery & Prize Scam"
-            explanation = "Urgent demands or congratulatory announcements of winnings. (Fallback)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Urgent demands or congratulatory announcements of winnings."
             red_flags = ["Lottery winnings announced", "Advance fee processing demand"]
             suggested_questions = [
                 "Ask which official website registry lists your ticket number.",
@@ -271,7 +282,7 @@ class RAGQueryEngine:
             risk_score = 0.70
             label = "SUSPICIOUS"
             category = "Bank Impersonation (KYC)"
-            explanation = "Suspicious card blockage warning or OTP request. (Fallback)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Suspicious card blockage warning or OTP request."
             red_flags = ["Demanded credentials or OTP", "KYC update urgency"]
             suggested_questions = [
                 "Ask for their employee ID and main branch department name.",
@@ -282,7 +293,7 @@ class RAGQueryEngine:
             risk_score = 0.72
             label = "SUSPICIOUS"
             category = "Law Enforcement Impersonation"
-            explanation = "Threats of arrest warrant or custom violation intercepts. (Fallback)"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest warrant or custom violation intercepts."
             red_flags = ["Arrest warrant threats", "Coercion into secrecy"]
             suggested_questions = [
                 "Ask which official police station is issuing this warrant and their ID.",
@@ -296,7 +307,7 @@ class RAGQueryEngine:
             if prior_questions:
                 if any(kw in text_lower for kw in ["no", "why", "refuse", "not telling", "don't ask", "shut up", "don't tell"]):
                     verdict = "EVASIVE"
-                    risk_score = min(0.98, risk_score + 0.20)
+                    risk_score = round(min(0.98, risk_score + 0.20), 2)
                     label = "SCAM"
                     safe_actions = ["Do NOT share any OTP code.", "Do NOT transfer any processing fees.", "Hang up the call immediately."]
                     suggested_questions = [] # Clear questions in DANGER
