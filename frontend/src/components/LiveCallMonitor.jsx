@@ -21,7 +21,15 @@ const LiveCallMonitor = ({ header }) => {
   const recognitionRef = useRef(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const processorRef = useRef(null);
   const statusRef = useRef(status);
+  const dfIntervalRef = useRef(null);
+
+  // Smoothed deepfake signal — EMA with alpha=0.25 to dampen jitter between WebSocket cycles
+  const smoothedDeepfakeRef = useRef(null);
+  const smoothedBreakdownRef = useRef(null);
+  const EMA_ALPHA = 0.25; // lower = smoother, higher = more responsive
 
   // Track accumulated and current session committed transcripts across silence-induced restarts
   const accumulatedCommittedRef = useRef('');
@@ -38,6 +46,20 @@ const LiveCallMonitor = ({ header }) => {
       recognitionRef.current.onerror = null;
       recognitionRef.current.stop();
       recognitionRef.current = null;
+    }
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      if (audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+      }
+      audioContextRef.current = null;
+    }
+    if (dfIntervalRef.current) {
+      clearInterval(dfIntervalRef.current);
+      dfIntervalRef.current = null;
     }
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop();
@@ -87,21 +109,32 @@ const LiveCallMonitor = ({ header }) => {
     }
     streamRef.current = stream;
 
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    recorderRef.current = recorder;
+    let audioContext;
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioContextClass({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+    } catch (e) {
+      console.error('Failed to create AudioContext:', e);
+      setError('Failed to initialize AudioContext for Whisper recording.');
+      return;
+    }
 
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-        ws.send(e.data);
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    processorRef.current = processor;
+
+    processor.onaudioprocess = (e) => {
+      const inputData = e.inputBuffer.getChannelData(0); // Float32Array (4096 samples at 16kHz)
+      if (ws.readyState === WebSocket.OPEN) {
+        // Send raw PCM float32 bytes
+        ws.send(inputData.buffer);
       }
     };
 
-    recorder.onstop = () => {
-      releaseMic();
-    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
 
-    recorder.start(CHUNK_MS);
     setStatus('live');
   };
 
@@ -110,6 +143,8 @@ const LiveCallMonitor = ({ header }) => {
     setUpdate(null);
     setFinalResult(null);
     setElapsedSeconds(0);
+    smoothedDeepfakeRef.current = null;
+    smoothedBreakdownRef.current = null;
 
     // Clear the accumulated transcripts for a fresh session
     accumulatedCommittedRef.current = '';
@@ -120,7 +155,7 @@ const LiveCallMonitor = ({ header }) => {
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       // Protocol: the first frame must be the JSON "start" control message
       ws.send(JSON.stringify({ type: 'start', caller_number: callerNumber.trim() || null }));
 
@@ -196,6 +231,47 @@ const LiveCallMonitor = ({ header }) => {
         };
 
         recognition.start();
+
+        // --- Background audio capture for AASIST deepfake detection ---
+        // Web Speech API gives us text but no audio. We solve this by running
+        // a silent MediaRecorder in parallel on the same mic stream, collecting
+        // 8-second audio chunks, and sending them to the backend for AASIST
+        // acoustic analysis only (backend skips Whisper on these frames).
+        const DEEPFAKE_MAGIC = 0xDF; // single-byte tag prepended to mark audio-only frames
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          streamRef.current = audioStream;
+
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : 'audio/webm';
+
+          const dfRecorder = new MediaRecorder(audioStream, { mimeType });
+          recorderRef.current = dfRecorder;
+
+          dfRecorder.ondataavailable = async (e) => {
+            if (!e.data || e.data.size < 1000) return;
+            if (ws.readyState !== WebSocket.OPEN) return;
+            // Prepend 0xDF magic byte so backend routes to process_audio_only()
+            const raw = await e.data.arrayBuffer();
+            const tagged = new Uint8Array(raw.byteLength + 1);
+            tagged[0] = DEEPFAKE_MAGIC;
+            tagged.set(new Uint8Array(raw), 1);
+            ws.send(tagged.buffer);
+          };
+
+          dfRecorder.start();
+          dfIntervalRef.current = setInterval(() => {
+            if (dfRecorder.state === 'recording') {
+              dfRecorder.stop();
+              dfRecorder.start();
+            }
+          }, 8000);
+        } catch (err) {
+          console.warn('Background audio capture for deepfake detection unavailable:', err);
+          // Non-fatal: webspeech transcript still works, deepfake score will be N/A
+        }
+
         setStatus('live');
       } else {
         // Direct Whisper mode
@@ -206,6 +282,29 @@ const LiveCallMonitor = ({ header }) => {
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === 'update') {
+        // Apply EMA smoothing to deepfake probability and evidence breakdown before rendering
+        if (msg.deepfake_probability !== null && msg.deepfake_probability !== undefined) {
+          const prev = smoothedDeepfakeRef.current;
+          const smoothed = prev === null
+            ? msg.deepfake_probability
+            : EMA_ALPHA * msg.deepfake_probability + (1 - EMA_ALPHA) * prev;
+          smoothedDeepfakeRef.current = smoothed;
+          msg.deepfake_probability = parseFloat(smoothed.toFixed(4));
+        }
+
+        // Smooth each evidence breakdown component independently
+        if (msg.evidence_breakdown) {
+          const prevBd = smoothedBreakdownRef.current || {};
+          const smoothedBd = {};
+          for (const key of ['transcript', 'deepfake', 'heuristics', 'rag_match', 'verification']) {
+            const cur = msg.evidence_breakdown[key] ?? 0;
+            const prevVal = prevBd[key] ?? cur;
+            smoothedBd[key] = parseFloat((EMA_ALPHA * cur + (1 - EMA_ALPHA) * prevVal).toFixed(4));
+          }
+          smoothedBreakdownRef.current = smoothedBd;
+          msg.evidence_breakdown = smoothedBd;
+        }
+
         setUpdate(msg);
         // Server clock is authoritative: snap the local 1s ticker to elapsed_s
         // only on real drift (>2s), so it keeps ticking smoothly in between
@@ -234,6 +333,15 @@ const LiveCallMonitor = ({ header }) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'end' }));
     }
+    // Hard timeout: if the backend doesn't send a 'final' within 4 seconds,
+    // force the session closed so the UI is never permanently stuck in 'stopping'.
+    setTimeout(() => {
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch (_) {}
+        wsRef.current = null;
+      }
+      setStatus((prev) => (prev === 'stopping' ? 'ended' : prev));
+    }, 4000);
   };
 
   const formatDuration = (seconds) => {
@@ -328,9 +436,9 @@ const LiveCallMonitor = ({ header }) => {
           {status === 'live' || status === 'stopping' ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <div className="status-dot" style={{ backgroundColor: 'var(--color-scam)', boxShadow: '0 0 8px var(--color-scam)' }}></div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--color-scam)', fontSize: '0.8rem' }}>
-                  {status === 'stopping' ? 'FINALIZING SESSION...' : 'LIVE MONITORING'}
+                <div className="status-dot" style={{ backgroundColor: status === 'stopping' ? 'var(--color-suspicious, #f59e0b)' : 'var(--color-scam)', boxShadow: status === 'stopping' ? '0 0 8px var(--color-suspicious)' : '0 0 8px var(--color-scam)' }}></div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: status === 'stopping' ? 'var(--color-suspicious, #f59e0b)' : 'var(--color-scam)', fontSize: '0.8rem' }}>
+                  {status === 'stopping' ? 'SESSION ENDED' : 'LIVE MONITORING'}
                 </span>
               </div>
               <div style={{ fontSize: '2.5rem', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
@@ -339,15 +447,21 @@ const LiveCallMonitor = ({ header }) => {
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #9ca3af)', fontFamily: 'var(--font-mono)', marginBottom: '0.25rem' }}>
                 Source: {transcriptionMode === 'webspeech' ? 'Browser Web Speech' : 'Local AI Whisper'}
               </div>
-              <button
-                type="button"
-                onClick={stopMonitoring}
-                disabled={status === 'stopping'}
-                className="submit-btn"
-                style={{ background: 'var(--color-scam)', width: 'auto', padding: '0.6rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-              >
-                <span style={{ fontSize: '0.8rem' }}>■</span> End Session
-              </button>
+              {status === 'stopping' ? (
+                <div style={{ fontSize: '0.85rem', color: 'var(--color-suspicious, #f59e0b)', fontWeight: 600, marginTop: '0.5rem', fontFamily: 'var(--font-mono)' }}>
+                  ⏳ SAVING SESSION AUDIT...
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopMonitoring}
+                  disabled={status === 'stopping'}
+                  className="submit-btn"
+                  style={{ background: 'var(--color-scam)', width: 'auto', padding: '0.6rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                >
+                  <span style={{ fontSize: '0.8rem' }}>■</span> End Session
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
@@ -387,11 +501,24 @@ const LiveCallMonitor = ({ header }) => {
         )}
       </div>
 
-      {/* Right Column: Live Transcript & Risk (plain rendering for M7) */}
+      {/* Right Column: Live Transcript & Risk Analysis */}
       <div>
-        {finalResult ? (
+        {status === 'stopping' ? (
+          <div className="glass-panel" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.25rem', minHeight: '350px' }}>
+            <div className="loader-ring" style={{ width: '50px', height: '50px', borderRadius: '50%', border: '4px solid rgba(139, 92, 246, 0.1)', borderTopColor: 'var(--accent-purple, #8b5cf6)', animation: 'spin 1s linear infinite' }}></div>
+            <style dangerouslySetInnerHTML={{__html: `
+              @keyframes spin {
+                to { transform: rotate(360deg); }
+              }
+            `}} />
+            <h3 style={{ margin: 0, color: 'var(--accent-purple, #8b5cf6)' }}>Processing Session Data</h3>
+            <p style={{ color: 'var(--text-secondary, #9ca3af)', textAlign: 'center', fontSize: '0.9rem', maxWidth: '320px', margin: 0, lineHeight: 1.5 }}>
+              Please wait, processing the data; the session has ended.
+            </p>
+          </div>
+        ) : finalResult ? (
           <AnalysisDetails data={finalResult} />
-        ) : (status === 'live' || status === 'stopping' || update) ? (
+        ) : (status === 'live' || update) ? (
           <div className="results-container">
             {/* Live threat header: smoothed (ratcheted) score drives the gauge */}
             <div className="glass-panel score-header-box">
@@ -404,7 +531,7 @@ const LiveCallMonitor = ({ header }) => {
                 <div className="metrics-row">
                   <div className="metric-tile">
                     <p>Confidence</p>
-                    <span>{update ? Math.round(update.confidence * 100) : 0}%</span>
+                    <span>{update ? Math.round((update.overall_confidence ?? update.confidence) * 100) : 0}%</span>
                   </div>
                   <div className="metric-tile scam-label">
                     <p>Category</p>
@@ -416,6 +543,58 @@ const LiveCallMonitor = ({ header }) => {
 
             {/* Coach card: mode banner, questions/actions, red flags */}
             <CoachPanel update={update} />
+
+            {/* Evidence breakdown: per-source contributions from the fusion engine */}
+            {update && update.evidence_breakdown && (
+              <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-purple, #8b5cf6)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.35rem' }}>
+                  Evidence Breakdown
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Transcript Risk:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{Math.round(update.evidence_breakdown.transcript * 100)}%</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>AI Voice Prob:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{update.evidence_breakdown.deepfake !== null ? `${Math.round(update.evidence_breakdown.deepfake * 100)}%` : 'N/A'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Scam Heuristics:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{Math.round(update.evidence_breakdown.heuristics * 100)}%</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>RBI Advisory Match:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{Math.round(update.evidence_breakdown.rag_match * 100)}%</span>
+                </div>
+                {update.evidence_breakdown.verification > 0.0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--color-scam, #ef4444)' }}>
+                    <span>Verification Penalty:</span>
+                    <span style={{ fontWeight: 600 }}>+{Math.round(update.evidence_breakdown.verification * 100)}%</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Live evidence reasoning trace from the explainability engine */}
+            {update && update.reasoning_trace && update.reasoning_trace.length > 0 && (
+              <div className="glass-panel" style={{
+                padding: '1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem',
+                maxHeight: '180px',
+                overflowY: 'auto'
+              }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-purple, #8b5cf6)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  🕵️ Live Evidence Reasoning
+                </div>
+                {update.reasoning_trace.map((step, idx) => (
+                  <div key={idx} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, paddingLeft: '0.5rem', borderLeft: '2px solid rgba(255,255,255,0.1)' }}>
+                    {step}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="glass-panel" style={{ padding: '1.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>

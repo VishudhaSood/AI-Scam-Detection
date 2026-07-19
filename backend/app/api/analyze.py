@@ -1,10 +1,13 @@
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException, status, Depends
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from app.models.schemas import AnalysisResponse
+from fastapi.concurrency import run_in_threadpool
+from app.models.schemas import AnalysisResponse, EvidenceBreakdown
 from app.services.analyzer import AnalyzerService
 from app.services.whisper_service import WhisperService
-from app.services.risk_engine import RiskEngine
+from app.services.deepfake_detector import AASISTDetector, DeepfakeResult
+from app.services.risk_engine import EvidenceFusionEngine
+from app.services.heuristic_scorer import HeuristicScorer
 from app.database.connection import get_db
 from app.database import crud
 
@@ -29,9 +32,8 @@ async def analyze_call(
             detail="Either a 'text' transcript or a 'file' audio upload must be provided."
         )
 
-    # 2. Extract or Transcribe Audio
+    # 2. Extract or Transcribe Audio & Run AASIST Deepfake Detector
     analysis_text = ""
-    deepfake_prob = 0.0
     
     if file:
         # Check the file extension just to ensure it's a valid media format
@@ -42,26 +44,65 @@ async def analyze_call(
                 detail=f"Unsupported file format '{file.filename}'. Please upload an audio file (WAV, MP3, M4A, OGG, WEBM)."
             )
         
-        # Call WhisperService to transcribe and compute deepfake likelihood
+        # Read raw bytes FIRST before Whisper consumes the file stream
+        content = await file.read()
+        await file.seek(0)
+        
+        # Call WhisperService to transcribe
         analysis_text = await WhisperService.transcribe_audio(file)
-        deepfake_prob = await WhisperService.detect_deepfake(file)
+        
+        # Call AASISTDetector with the already-read bytes + transcript
+        df_result = await run_in_threadpool(AASISTDetector.detect, content, file.filename, analysis_text)
     else:
         analysis_text = text
         # Direct text inputs have no deepfake voice biometric context
-        deepfake_prob = 0.05
+        df_result = DeepfakeResult(probability=None, label=None, confidence=None, model="AASIST", latency_ms=0.0)
 
     # 3. Invoke Domain Service for content and advisory evaluation
     response = AnalyzerService.analyze_transcript(analysis_text)
     
-    # 4. Compute combined risk and label via Risk Engine
-    combined_risk, final_label = RiskEngine.calculate_combined_risk(
-        deepfake_prob, response.risk_score, is_text_only=(file is None)
-    )
+    # 4. Compute combined risk and label via Evidence Orchestrator
+    from app.services.evidence_orchestrator import EvidenceOrchestrator
     
-    # Update response object with unified metrics
-    response.risk_score = combined_risk
-    response.label = final_label
-    response.deepfake_probability = deepfake_prob
+    # Create a temporary state-holding class representing session state to satisfy providers
+    class TempSession:
+        def __init__(self):
+            self.llm_audits_done = 1
+            self.last_llm_risk = response.risk_score
+            self.llm_scam_category = response.scam_category
+            self.llm_red_flags = []
+            self.pending_questions = []
+            self.llm_suggested_questions = []
+            self.llm_safe_actions = []
+            self.llm_advisories = response.advisories
+            self.llm_verdict = "N/A"
+            self.last_deepfake_result = df_result
+            self.last_audit_word_count = len(analysis_text.split())
+            self.last_llm_audit_time = 0.0
+
+    temp_session = TempSession()
+    
+    orchestrator = EvidenceOrchestrator()
+    context = {
+        "session": temp_session,
+        "transcript": analysis_text,
+        "deepfake_result": df_result,
+        "audio_data": content if file else None,
+        "filename": file.filename if file else None
+    }
+    
+    eval_result = await orchestrator.evaluate(context)
+    
+    # Update response object with unified metrics and evidence breakdown
+    response.risk_score = eval_result["risk_smoothed"]
+    response.label = "SCAM" if eval_result["risk_smoothed"] >= 0.75 else "SUSPICIOUS" if eval_result["risk_smoothed"] >= 0.40 else "SAFE"
+    response.deepfake_probability = df_result.probability
+    response.deepfake_label = df_result.label
+    response.deepfake_confidence = df_result.confidence
+    response.deepfake_model = df_result.model
+    response.evidence_breakdown = EvidenceBreakdown(**eval_result["evidence_breakdown"])
+    response.overall_confidence = eval_result["confidence"]
+    response.reasoning_trace = eval_result["reasoning_trace"]
 
     # 5. Persist the log in the database
     crud.save_analysis_result(db, response)

@@ -81,12 +81,24 @@ async def live_monitor(websocket: WebSocket):
         while True:
             frame = await websocket.receive()
             if frame.get("bytes") is not None:
-                # Boundary validation: process_cycle may return a dict or a
-                # model; the wire only ever carries a contract-checked
-                # LiveUpdate (internal extras like trigger_llm are dropped).
-                raw = await session.process_cycle(frame["bytes"])
-                last_update = LiveUpdate.model_validate(raw)
-                await websocket.send_text(last_update.model_dump_json())
+                chunk = frame["bytes"]
+                # Detect 0xDF-tagged audio-only frames (from webspeech hybrid mode).
+                # These are WebM chunks sent purely for AASIST deepfake analysis —
+                # Whisper is NOT run on them since Web Speech already handles the transcript.
+                if len(chunk) > 1 and chunk[0] == 0xDF:
+                    audio_bytes = chunk[1:]  # strip the magic byte
+                    if hasattr(session, "process_audio_only"):
+                        await session.process_audio_only(audio_bytes)
+                        # Re-run the risk evaluation cycle with the current transcript text to update
+                        # all fused risk scores and deepfake statistics.
+                        raw = await session.process_text_cycle(session.committed_text, session.partial_text)
+                        last_update = LiveUpdate.model_validate(raw)
+                        await websocket.send_text(last_update.model_dump_json())
+                else:
+                    # Normal Whisper mode: full cycle (STT + AASIST + risk fusion)
+                    raw = await session.process_cycle(chunk)
+                    last_update = LiveUpdate.model_validate(raw)
+                    await websocket.send_text(last_update.model_dump_json())
             elif frame.get("text") is not None:
                 message = json.loads(frame["text"])
                 if message.get("type") == "end":
@@ -102,36 +114,92 @@ async def live_monitor(websocket: WebSocket):
         client_connected = False
     finally:
         # Finalize even on abrupt disconnect: a dropped browser tab must not
-        # lose the call data. LiveSession.finalize() lands in Milestone 9;
-        # until then a fallback final is assembled from the last update.
+        # lose the call data. Send final immediately from cached state to avoid
+        # blocking the close on heavy backend inference.
         if session is not None:
-            final = await _finalize_session(session, last_update)
+            final = _build_final_from_last_update(session, last_update)
+            
+            # Persist live call log to SQLite DB (Milestone 9)
+            try:
+                from app.database.connection import SessionLocal
+                from app.database import crud
+                db = SessionLocal()
+                try:
+                    db_log = crud.save_analysis_result(db, final)
+                    final.log_id = db_log.id
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"Failed to persist live call log: {e}")
+
             if client_connected:
-                await websocket.send_text(final.model_dump_json())
+                try:
+                    await websocket.send_text(final.model_dump_json())
+                except Exception:
+                    pass  # client may have already disconnected
 
     if client_connected:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> LiveFinal:
+    """
+    Instantly assembles the final report from the last cached LiveUpdate.
+    This is intentionally synchronous and non-blocking — no heavy inference
+    is re-run at teardown time. The live session already computed everything
+    incrementally during the active session.
+    """
+    transcript = ""
+    if last_update is not None:
+        transcript = (last_update.transcript_committed + " " + (last_update.transcript_partial or "")).strip()
+
+    risk_score  = last_update.risk_raw       if last_update else 0.0
+    label       = last_update.label          if last_update else "SAFE"
+    scam_cat    = last_update.scam_category  if last_update else "None"
+    advisories  = last_update.advisories     if last_update else []
+
+    # Pull deepfake probability from the last update if it was populated
+    df_prob = None
+    df_label = None
+    df_conf = None
+    df_model = None
+    evidence_breakdown = None
+    overall_confidence = 0.0
+    reasoning_trace = []
+    
+    if last_update is not None:
+        df_prob  = getattr(last_update, "deepfake_probability", None)
+        df_label = getattr(last_update, "deepfake_label", None)
+        df_conf  = getattr(last_update, "deepfake_confidence", None)
+        df_model = getattr(last_update, "deepfake_model", None)
+        evidence_breakdown = getattr(last_update, "evidence_breakdown", None)
+        overall_confidence = getattr(last_update, "overall_confidence", 0.0)
+        reasoning_trace = getattr(last_update, "reasoning_trace", [])
+
+    return LiveFinal(
+        session_id=session.session_id,
+        transcript=transcript or "(no speech captured)",
+        risk_score=risk_score,
+        label=label,
+        scam_category=scam_cat,
+        deepfake_probability=df_prob,
+        deepfake_label=df_label,
+        deepfake_confidence=df_conf,
+        deepfake_model=df_model,
+        evidence_breakdown=evidence_breakdown,
+        overall_confidence=overall_confidence,
+        reasoning_trace=reasoning_trace,
+        explanation="Live session completed. Risk scores were computed incrementally during the call.",
+        advisories=advisories,
+    )
 
 
 async def _finalize_session(session, last_update: LiveUpdate | None) -> LiveFinal:
     """
-    Uses LiveSession.finalize() when available (Milestone 9); otherwise
-    builds the final report from the last pushed update so the client
-    always receives a closing "final" frame.
+    Legacy async path kept for backward compatibility.
+    Delegates immediately to the synchronous fast path.
     """
-    if hasattr(session, "finalize"):
-        return LiveFinal.model_validate(await session.finalize())
-
-    transcript = ""
-    if last_update is not None:
-        transcript = (last_update.transcript_committed + " " + last_update.transcript_partial).strip()
-    return LiveFinal(
-        session_id=session.session_id,
-        transcript=transcript or "(no speech captured)",
-        risk_score=last_update.risk_raw if last_update else 0.0,
-        label=last_update.label if last_update else "SAFE",
-        scam_category=last_update.scam_category if last_update else "None",
-        deepfake_probability=0.0,
-        explanation="Live session summary (heuristic-only, Milestone 7). Full analysis arrives with session finalization in Milestone 9.",
-        advisories=last_update.advisories if last_update else [],
-    )
+    return _build_final_from_last_update(session, last_update)

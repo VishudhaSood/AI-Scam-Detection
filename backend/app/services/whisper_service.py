@@ -43,7 +43,7 @@ class WhisperService:
     def _get_model(cls, force_cpu=False):
         with cls._model_lock:
             if force_cpu:
-                cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                cls._model = WhisperModel("base", device="cpu", compute_type="int8")
                 cls._device = "cpu"
                 return cls._model
 
@@ -52,15 +52,15 @@ class WhisperService:
                 # without the runtime DLLs can poison the process (cuda_check.py).
                 if not cuda_runtime_available():
                     print("CUDA runtime libraries not found; using CPU int8 Whisper model.")
-                    cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                    cls._model = WhisperModel("base", device="cpu", compute_type="int8")
                     cls._device = "cpu"
                     return cls._model
                 try:
-                    cls._model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                    cls._model = WhisperModel("base", device="cuda", compute_type="float16")
                     cls._device = "cuda"
                 except Exception as e:
                     print(f"Failed to load CUDA model ({e}), loading on CPU...")
-                    cls._model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                    cls._model = WhisperModel("base", device="cpu", compute_type="int8")
                     cls._device = "cpu"
             return cls._model
 
@@ -87,6 +87,7 @@ class WhisperService:
                 temp_path,
                 beam_size=5,
                 language="en",
+                initial_prompt="SBI, KYC, OTP, AnyDesk, customs, police",
                 vad_filter=True
             )
             # Evaluate the generator to run the actual inference in this thread
@@ -100,6 +101,7 @@ class WhisperService:
                     temp_path,
                     beam_size=5,
                     language="en",
+                    initial_prompt="SBI, KYC, OTP, AnyDesk, customs, police",
                     vad_filter=True
                 )
                 text = "".join(segment.text for segment in segments)

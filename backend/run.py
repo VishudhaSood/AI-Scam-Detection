@@ -23,6 +23,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Default to using real Whisper transcription unless explicitly requested
 os.environ.setdefault("USE_MOCK_WHISPER", "false")
 
+# AASIST Voice Spoofing / Deepfake detection configuration defaults
+os.environ.setdefault("ENABLE_DEEPFAKE", "true")
+os.environ.setdefault("DEEPFAKE_MODEL", "aasist")
+os.environ.setdefault("DEEPFAKE_THRESHOLD", "0.5")
+os.environ.setdefault("MODEL_PATH", "app/resources/aasist.onnx")
+
+
 if __name__ == "__main__":
     print("Starting AI Scam Detection Backend...")
     uvicorn.run(
