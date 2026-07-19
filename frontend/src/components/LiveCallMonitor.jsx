@@ -569,6 +569,29 @@ const LiveCallMonitor = ({ header }) => {
               )}
             </div>
 
+            {update && update.reasoning_trace && update.reasoning_trace.length > 0 && (
+              <div style={{
+                background: 'rgba(0,0,0,0.15)',
+                borderRadius: '0.5rem',
+                padding: '0.75rem',
+                border: '1px solid rgba(255,255,255,0.05)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem',
+                maxHeight: '150px',
+                overflowY: 'auto'
+              }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-purple, #8b5cf6)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  🕵️ Live Evidence Reasoning
+                </div>
+                {update.reasoning_trace.map((step, idx) => (
+                  <div key={idx} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4, paddingLeft: '0.5rem', borderLeft: '2px solid rgba(255,255,255,0.1)' }}>
+                    {step}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={{
               background: 'rgba(0,0,0,0.25)',
               borderRadius: '0.5rem',

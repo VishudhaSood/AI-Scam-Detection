@@ -61,7 +61,7 @@ class StreamingTranscriber:
                 # loader and deadlock later native calls (see cuda_check.py).
                 if cuda_runtime_available():
                     try:
-                        model = WhisperModel("tiny", device="cuda", compute_type="float16")
+                        model = WhisperModel("base", device="cuda", compute_type="float16")
                         # Constructor success does not prove CUDA works (DLL load
                         # is deferred to first inference) — probe before caching.
                         probe_segments, _ = model.transcribe(
@@ -69,15 +69,15 @@ class StreamingTranscriber:
                         )
                         list(probe_segments)
                         cls._device = "cuda"
-                        print("Loaded Whisper tiny model on CUDA.")
+                        print("Loaded Whisper base model on CUDA.")
                     except Exception as e:
                         print(f"Failed to load Whisper on CUDA ({e}), falling back to CPU...")
-                        model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                        model = WhisperModel("base", device="cpu", compute_type="int8")
                         cls._device = "cpu"
-                        print("Loaded Whisper tiny model on CPU.")
+                        print("Loaded Whisper base model on CPU.")
                 else:
                     print("CUDA runtime libraries not found; using CPU int8 Whisper model.")
-                    model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                    model = WhisperModel("base", device="cpu", compute_type="int8")
                     cls._device = "cpu"
                 cls._model = model
         return cls._model
@@ -148,6 +148,7 @@ class StreamingTranscriber:
                 pcm_data,
                 beam_size=5,
                 language="en",
+                initial_prompt="SBI, KYC, OTP, AnyDesk, customs, police",
                 vad_filter=True
             )
             text = "".join(segment.text for segment in segments)

@@ -118,6 +118,20 @@ async def live_monitor(websocket: WebSocket):
         # blocking the close on heavy backend inference.
         if session is not None:
             final = _build_final_from_last_update(session, last_update)
+            
+            # Persist live call log to SQLite DB (Milestone 9)
+            try:
+                from app.database.connection import SessionLocal
+                from app.database import crud
+                db = SessionLocal()
+                try:
+                    db_log = crud.save_analysis_result(db, final)
+                    final.log_id = db_log.id
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"Failed to persist live call log: {e}")
+
             if client_connected:
                 try:
                     await websocket.send_text(final.model_dump_json())
@@ -150,9 +164,20 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
     # Pull deepfake probability from the last update if it was populated
     df_prob = None
     df_label = None
+    df_conf = None
+    df_model = None
+    evidence_breakdown = None
+    overall_confidence = 0.0
+    reasoning_trace = []
+    
     if last_update is not None:
         df_prob  = getattr(last_update, "deepfake_probability", None)
         df_label = getattr(last_update, "deepfake_label", None)
+        df_conf  = getattr(last_update, "deepfake_confidence", None)
+        df_model = getattr(last_update, "deepfake_model", None)
+        evidence_breakdown = getattr(last_update, "evidence_breakdown", None)
+        overall_confidence = getattr(last_update, "overall_confidence", 0.0)
+        reasoning_trace = getattr(last_update, "reasoning_trace", [])
 
     return LiveFinal(
         session_id=session.session_id,
@@ -161,6 +186,12 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
         label=label,
         scam_category=scam_cat,
         deepfake_probability=df_prob,
+        deepfake_label=df_label,
+        deepfake_confidence=df_conf,
+        deepfake_model=df_model,
+        evidence_breakdown=evidence_breakdown,
+        overall_confidence=overall_confidence,
+        reasoning_trace=reasoning_trace,
         explanation="Live session completed. Risk scores were computed incrementally during the call.",
         advisories=advisories,
     )

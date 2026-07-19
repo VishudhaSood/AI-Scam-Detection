@@ -61,27 +61,48 @@ async def analyze_call(
     # 3. Invoke Domain Service for content and advisory evaluation
     response = AnalyzerService.analyze_transcript(analysis_text)
     
-    # 4. Compute combined risk and label via Evidence Fusion Engine
-    heuristic_risk = HeuristicScorer.score(analysis_text).risk
-    advisories_count = len(response.advisories)
+    # 4. Compute combined risk and label via Evidence Orchestrator
+    from app.services.evidence_orchestrator import EvidenceOrchestrator
     
-    combined_risk, breakdown = EvidenceFusionEngine.fuse_evidence(
-        transcript_risk=response.risk_score,
-        deepfake_prob=df_result.probability,
-        heuristic_risk=heuristic_risk,
-        advisories_count=advisories_count,
-        verification_verdict="N/A"
-    )
+    # Create a temporary state-holding class representing session state to satisfy providers
+    class TempSession:
+        def __init__(self):
+            self.llm_audits_done = 1
+            self.last_llm_risk = response.risk_score
+            self.llm_scam_category = response.scam_category
+            self.llm_red_flags = []
+            self.pending_questions = []
+            self.llm_suggested_questions = []
+            self.llm_safe_actions = []
+            self.llm_advisories = response.advisories
+            self.llm_verdict = "N/A"
+            self.last_deepfake_result = df_result
+            self.last_audit_word_count = len(analysis_text.split())
+            self.last_llm_audit_time = 0.0
+
+    temp_session = TempSession()
+    
+    orchestrator = EvidenceOrchestrator()
+    context = {
+        "session": temp_session,
+        "transcript": analysis_text,
+        "deepfake_result": df_result,
+        "audio_data": content if file else None,
+        "filename": file.filename if file else None
+    }
+    
+    eval_result = await orchestrator.evaluate(context)
     
     # Update response object with unified metrics and evidence breakdown
-    response.risk_score = combined_risk
-    response.label = "SCAM" if combined_risk >= 0.75 else "SUSPICIOUS" if combined_risk >= 0.40 else "SAFE"
+    response.risk_score = eval_result["risk_smoothed"]
+    response.label = "SCAM" if eval_result["risk_smoothed"] >= 0.75 else "SUSPICIOUS" if eval_result["risk_smoothed"] >= 0.40 else "SAFE"
     response.deepfake_probability = df_result.probability
     response.deepfake_label = df_result.label
     response.deepfake_confidence = df_result.confidence
     response.deepfake_model = df_result.model
-    response.evidence_breakdown = EvidenceBreakdown(**breakdown)
-    response.overall_confidence = min(1.0, len(analysis_text.split()) / 120.0)
+    response.evidence_breakdown = EvidenceBreakdown(**eval_result["evidence_breakdown"])
+    response.overall_confidence = eval_result["confidence"]
+    response.reasoning_trace = eval_result["reasoning_trace"]
 
     # 5. Persist the log in the database
     crud.save_analysis_result(db, response)

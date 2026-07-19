@@ -46,6 +46,7 @@ class AnalysisResponse(BaseModel):
     overall_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Overall confidence based on transcript length and audits done.")
     explanation: str = Field(..., description="LLM-generated explanation of why the call was classified this way.")
     advisories: List[Advisory] = Field(default=[], description="List of matched RBI or CERT-In advisories from RAG.")
+    reasoning_trace: List[str] = Field(default=[], description="Step-by-step audit reasoning trace from Evidence Fusion.")
     analyzed_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of when the analysis was performed.")
 
 
@@ -123,6 +124,7 @@ class LiveUpdate(BaseModel):
     deepfake_model: Optional[str] = Field(None, description="Deepfake model name.")
     evidence_breakdown: Optional[EvidenceBreakdown] = Field(None, description="Detailed score contributions from multiple sources.")
     overall_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Overall evidence backing confidence.")
+    reasoning_trace: List[str] = Field(default=[], description="Step-by-step evidence reasoning steps.")
 
 
 class LiveFinal(AnalysisResponse):

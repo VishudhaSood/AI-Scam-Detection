@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, List, Any
 
 logger = logging.getLogger("app.services.risk_engine")
 
@@ -24,6 +24,42 @@ class EvidenceFusionEngine:
         "rag_match": 0.10,       # ChromaDB advisory match count
         "verification": 0.10      # Caller response to verification questions
     }
+
+    @classmethod
+    def fuse_evidence_list(
+        cls,
+        evidence_list: List[Any]
+    ) -> Tuple[float, Dict[str, float]]:
+        """
+        Adapts the new EvidenceProvider outputs to the fusion logic.
+        """
+        # Map list of Evidence into dict
+        ev_dict = {ev.source: ev for ev in evidence_list}
+        
+        transcript_risk = ev_dict["transcript"].score if "transcript" in ev_dict else 0.0
+        heuristic_risk = ev_dict["heuristics"].score if "heuristics" in ev_dict else 0.0
+        rag_score = ev_dict["rag_match"].score if "rag_match" in ev_dict else 0.0
+        verification_score = ev_dict["verification"].score if "verification" in ev_dict else 0.0
+        
+        deepfake_ev = ev_dict.get("deepfake")
+        deepfake_prob = None
+        if deepfake_ev is not None and deepfake_ev.details.get("probability") is not None:
+            deepfake_prob = deepfake_ev.score
+
+        advisories_count = int(rag_score * 2.0)
+        
+        # Determine verdict string
+        verification_verdict = "N/A"
+        if "verification" in ev_dict:
+            verification_verdict = ev_dict["verification"].details.get("verdict", "N/A")
+            
+        return cls.fuse_evidence(
+            transcript_risk=transcript_risk,
+            deepfake_prob=deepfake_prob,
+            heuristic_risk=heuristic_risk,
+            advisories_count=advisories_count,
+            verification_verdict=verification_verdict
+        )
 
     @classmethod
     def fuse_evidence(
@@ -103,6 +139,42 @@ class EvidenceFusionEngine:
         return fused_score, breakdown
 
 
+class ConfidenceEngine:
+    """
+    Multi-factor engine that dynamically estimates overall confidence
+    of the scam classification using transcript length, LLM audit depth,
+    audio duration analyzed, and RAG warnings matched.
+    """
+    
+    @classmethod
+    def calculate_confidence(
+        cls,
+        word_count: int,
+        llm_audits_done: int,
+        audio_seconds: float = 0.0,
+        retrieval_hits: int = 0
+    ) -> float:
+        # 1. Transcript length coverage (benchmark: 120 words)
+        word_factor = min(1.0, word_count / 120.0)
+        
+        # 2. AI Reasoning depth (benchmark: 2 audits)
+        audit_factor = min(1.0, llm_audits_done / 2.0)
+        
+        # 3. Audio exposure (benchmark: 30 seconds)
+        audio_factor = min(1.0, audio_seconds / 30.0) if audio_seconds > 0.0 else 1.0
+        
+        # 4. Regulatory database alignment
+        retrieval_factor = min(1.0, retrieval_hits / 2.0) if retrieval_hits > 0 else 0.5
+
+        # Blended geometric mean to prevent single-factor overconfidence
+        factors = [word_factor, audit_factor, audio_factor, retrieval_factor]
+        clamped_factors = [max(0.05, f) for f in factors]
+        
+        import math
+        geom_mean = math.prod(clamped_factors) ** (1.0 / len(clamped_factors))
+        return round(geom_mean, 2)
+
+
 class AdaptiveRiskEngine:
     """
     Stateful risk engine for live calls.
@@ -119,12 +191,19 @@ class AdaptiveRiskEngine:
         self.verify_exit_low_start = None  # Start timestamp when risk < 0.35 sustained
         self.danger_exit_low_start = None  # Start timestamp when risk < 0.65 sustained
 
-    def process_cycle(self, risk_raw: float, word_count: int, llm_audits_done: int) -> Tuple[float, float, str]:
+    def process_cycle(
+        self,
+        risk_raw: float,
+        word_count: int,
+        llm_audits_done: int,
+        audio_seconds: float = 0.0,
+        retrieval_hits: int = 0
+    ) -> Tuple[float, float, str]:
         """
         Runs one cycle of the stateful risk engine:
         1. Smooth raw risk using EMA (alpha = 0.35)
         2. Apply ratchet floor
-        3. Compute confidence
+        3. Compute confidence via ConfidenceEngine
         4. Compute next mode with hysteresis
         
         Returns:
@@ -145,10 +224,13 @@ class AdaptiveRiskEngine:
         # Round smoothed risk
         self.smoothed_risk = round(max(0.0, min(1.0, self.smoothed_risk)), 2)
 
-        # 3. Confidence Calculation
-        word_factor = min(1.0, word_count / 120.0)
-        audit_factor = min(1.0, llm_audits_done / 2.0)
-        confidence = round(word_factor * audit_factor, 2)
+        # 3. Dynamic Confidence Calculation
+        confidence = ConfidenceEngine.calculate_confidence(
+            word_count=word_count,
+            llm_audits_done=llm_audits_done,
+            audio_seconds=audio_seconds,
+            retrieval_hits=retrieval_hits
+        )
 
         # 4. State Machine & Hysteresis
         now = time.time()

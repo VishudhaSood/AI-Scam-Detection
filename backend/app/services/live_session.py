@@ -6,6 +6,7 @@ from app.services.streaming_transcriber import StreamingTranscriber
 from app.services.heuristic_scorer import HeuristicScorer
 from app.services.deepfake_detector import AASISTDetector, DeepfakeResult
 from app.services.risk_engine import AdaptiveRiskEngine, EvidenceFusionEngine
+from app.services.evidence_orchestrator import EvidenceOrchestrator
 
 logger = logging.getLogger("app.services.live_session")
 
@@ -60,6 +61,8 @@ class LiveSession:
             "rag_match": 0.0,
             "verification": 0.0
         }
+        self.orchestrator = EvidenceOrchestrator()
+        self.last_reasoning_trace = []
 
     async def process_text_cycle(self, committed: str, partial: str) -> dict:
         """
@@ -168,78 +171,29 @@ class LiveSession:
 
     async def _evaluate_risk_and_llm(self, full_transcript: str, trigger_llm: bool) -> dict:
         """
-        Runs HeuristicScorer and evaluates the incremental LLM audit throttling policy,
-        blending scores and passing it through the AdaptiveRiskEngine.
+        Delegates evaluation to the modular EvidenceOrchestrator.
         """
-        words = full_transcript.split()
-        word_count = len(words)
-        new_speech = word_count > self.last_audit_word_count
-
-        now = time.time()
-        time_elapsed = now - self.last_llm_audit_time
-
-        # LLM Throttle Policy:
-        # 1. Immediately on high-tier heuristic trigger_llm.
-        # 2. When questions were pending and new speech arrived since the last audit (check for answers).
-        # 3. Every 20 seconds of elapsed time, if new speech has arrived.
-        should_audit = False
-        if trigger_llm:
-            should_audit = True
-        elif self.pending_questions and new_speech:
-            should_audit = True
-        elif time_elapsed >= 20.0 and new_speech:
-            should_audit = True
-
-        if should_audit:
-            try:
-                from app.rag.query_engine import RAGQueryEngine
-                audit_result = await run_in_threadpool(
-                    RAGQueryEngine.evaluate_incremental,
-                    full_transcript,
-                    self.pending_questions
-                )
-                
-                self.llm_audits_done += 1
-                self.last_llm_audit_time = now
-                self.last_audit_word_count = word_count
-                
-                self.last_llm_risk = audit_result.get("risk_score", 0.0)
-                self.llm_scam_category = audit_result.get("scam_category", "None")
-                self.llm_red_flags = audit_result.get("red_flags", [])
-                self.llm_suggested_questions = audit_result.get("suggested_questions", [])
-                self.llm_safe_actions = audit_result.get("safe_actions", [])
-                self.llm_advisories = audit_result.get("advisories", [])
-                self.llm_verdict = audit_result.get("question_response_verdict", "N/A")
-                
-                self.pending_questions = self.llm_suggested_questions
-            except Exception as e:
-                print(f"Error in incremental LLM audit: {e}")
-
-        # Run Evidence Fusion: combine Qwen content, AASIST voice deepfake, heuristics, RAG match, and verdict
-        heuristic_result = HeuristicScorer.score(full_transcript)
+        context = {
+            "session": self,
+            "transcript": full_transcript,
+            "trigger_llm": trigger_llm
+        }
         
-        risk_raw, self.last_breakdown = EvidenceFusionEngine.fuse_evidence(
-            transcript_risk=self.last_llm_risk,
-            deepfake_prob=self.last_deepfake_result.probability,
-            heuristic_risk=heuristic_result.risk,
-            advisories_count=len(self.llm_advisories),
-            verification_verdict=self.llm_verdict
-        )
-
-        # Run AdaptiveRiskEngine (EMA, ratchet, confidence, state machine)
-        smoothed_risk, confidence, mode = self.risk_engine.process_cycle(
-            risk_raw=risk_raw,
-            word_count=word_count,
-            llm_audits_done=self.llm_audits_done
-        )
-
+        # Run orchestration
+        eval_result = await self.orchestrator.evaluate(context)
+        
+        # Cache the reasoning trace for inclusion in the final report
+        self.last_reasoning_trace = eval_result["reasoning_trace"]
+        
+        # Determine combined red flags
+        heuristic_result = HeuristicScorer.score(full_transcript)
         combined_red_flags = list(set(heuristic_result.tier_hits + self.llm_red_flags))
-
+        
         return self._build_update(
-            risk_raw=risk_raw,
-            risk_smoothed=smoothed_risk,
-            confidence=confidence,
-            mode=mode,
+            risk_raw=eval_result["risk_raw"],
+            risk_smoothed=eval_result["risk_smoothed"],
+            confidence=eval_result["confidence"],
+            mode=eval_result["mode"],
             red_flags=combined_red_flags,
             trigger_llm=trigger_llm
         )
@@ -289,5 +243,6 @@ class LiveSession:
             "deepfake_confidence": self.last_deepfake_result.confidence,
             "deepfake_model": self.last_deepfake_result.model,
             "evidence_breakdown": self.last_breakdown,
-            "overall_confidence": confidence
+            "overall_confidence": confidence,
+            "reasoning_trace": self.last_reasoning_trace
         }

@@ -102,6 +102,30 @@ const AnalysisDetails = ({ data }) => {
         </div>
       )}
 
+      {/* Evidence Reasoning Trace Card */}
+      {data.reasoning_trace && data.reasoning_trace.length > 0 && (
+        <div className="glass-panel reasoning-trace-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' }}>
+            🕵️ Evidence Reasoning Trace
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {data.reasoning_trace.map((step, idx) => (
+              <div key={idx} style={{ 
+                fontSize: '0.85rem', 
+                color: 'var(--text-secondary)', 
+                lineHeight: 1.5,
+                background: 'rgba(255, 255, 255, 0.02)',
+                padding: '0.5rem 0.75rem',
+                borderRadius: '0.375rem',
+                borderLeft: '3px solid ' + (step.startsWith('[Evidence Fusion]') ? 'var(--accent-blue, #3b82f6)' : step.startsWith('[Temporal Adaptation]') ? 'var(--accent-purple, #8b5cf6)' : 'rgba(255, 255, 255, 0.15)')
+              }}>
+                {step}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 2. Simulated Transcript Box */}
       <div className="glass-panel transcript-card">
         <h3>
