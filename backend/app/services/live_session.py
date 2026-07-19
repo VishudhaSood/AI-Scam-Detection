@@ -150,8 +150,11 @@ class LiveSession:
 
         active_block_pcm = pcm_data[self.block_start_sample:]
         self.partial_text = await run_in_threadpool(self.transcriber.transcribe_pcm, active_block_pcm)
-        
-        if len(active_block_pcm) >= 480000:
+
+        # Commit at 15s (240k samples @16kHz), not 30s: the whole active block is
+        # re-transcribed every cycle, and near a 30s block CPU Whisper exceeds the
+        # 5s chunk budget — frames backlog and the transcript stalls, then jumps.
+        if len(active_block_pcm) >= 240000:
             if self.partial_text:
                 self.committed_text += (" " if self.committed_text else "") + self.partial_text
             self.block_start_sample = len(pcm_data)

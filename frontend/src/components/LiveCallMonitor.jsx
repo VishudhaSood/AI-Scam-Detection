@@ -15,6 +15,10 @@ const LiveCallMonitor = ({ header }) => {
   const [error, setError] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [transcriptionMode, setTranscriptionMode] = useState('webspeech'); // 'webspeech' | 'whisper'
+  // Background voice-clone capture runs a second mic consumer next to
+  // SpeechRecognition, which can degrade recognition on some devices —
+  // expose a toggle so the two can be compared live
+  const [voiceCloneScan, setVoiceCloneScan] = useState(true);
 
   // Mutable machinery lives in refs: changing these must not re-render the UI
   const wsRef = useRef(null);
@@ -257,38 +261,40 @@ const LiveCallMonitor = ({ header }) => {
         // 8-second audio chunks, and sending them to the backend for AASIST
         // acoustic analysis only (backend skips Whisper on these frames).
         const DEEPFAKE_MAGIC = 0xDF; // single-byte tag prepended to mark audio-only frames
-        try {
-          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-          streamRef.current = audioStream;
+        if (voiceCloneScan) {
+          try {
+            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            streamRef.current = audioStream;
 
-          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus'
-            : 'audio/webm';
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+              ? 'audio/webm;codecs=opus'
+              : 'audio/webm';
 
-          const dfRecorder = new MediaRecorder(audioStream, { mimeType });
-          recorderRef.current = dfRecorder;
+            const dfRecorder = new MediaRecorder(audioStream, { mimeType });
+            recorderRef.current = dfRecorder;
 
-          dfRecorder.ondataavailable = async (e) => {
-            if (!e.data || e.data.size < 1000) return;
-            if (ws.readyState !== WebSocket.OPEN) return;
-            // Prepend 0xDF magic byte so backend routes to process_audio_only()
-            const raw = await e.data.arrayBuffer();
-            const tagged = new Uint8Array(raw.byteLength + 1);
-            tagged[0] = DEEPFAKE_MAGIC;
-            tagged.set(new Uint8Array(raw), 1);
-            ws.send(tagged.buffer);
-          };
+            dfRecorder.ondataavailable = async (e) => {
+              if (!e.data || e.data.size < 1000) return;
+              if (ws.readyState !== WebSocket.OPEN) return;
+              // Prepend 0xDF magic byte so backend routes to process_audio_only()
+              const raw = await e.data.arrayBuffer();
+              const tagged = new Uint8Array(raw.byteLength + 1);
+              tagged[0] = DEEPFAKE_MAGIC;
+              tagged.set(new Uint8Array(raw), 1);
+              ws.send(tagged.buffer);
+            };
 
-          dfRecorder.start();
-          dfIntervalRef.current = setInterval(() => {
-            if (dfRecorder.state === 'recording') {
-              dfRecorder.stop();
-              dfRecorder.start();
-            }
-          }, 8000);
-        } catch (err) {
-          console.warn('Background audio capture for deepfake detection unavailable:', err);
-          // Non-fatal: webspeech transcript still works, deepfake score will be N/A
+            dfRecorder.start();
+            dfIntervalRef.current = setInterval(() => {
+              if (dfRecorder.state === 'recording') {
+                dfRecorder.stop();
+                dfRecorder.start();
+              }
+            }, 8000);
+          } catch (err) {
+            console.warn('Background audio capture for deepfake detection unavailable:', err);
+            // Non-fatal: webspeech transcript still works, deepfake score will be N/A
+          }
         }
 
         setStatus('live');
@@ -443,6 +449,26 @@ const LiveCallMonitor = ({ header }) => {
             🤖 Local Whisper
           </button>
         </div>
+
+        {transcriptionMode === 'webspeech' && (
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.8rem',
+            color: 'var(--text-muted)',
+            marginBottom: '1.25rem',
+            cursor: isRunning ? 'not-allowed' : 'pointer',
+          }}>
+            <input
+              type="checkbox"
+              checked={voiceCloneScan}
+              onChange={(e) => setVoiceCloneScan(e.target.checked)}
+              disabled={isRunning}
+            />
+            Voice-clone scan (parallel mic capture — turn off if speech recognition degrades)
+          </label>
+        )}
 
         <div
           className="dropzone"
