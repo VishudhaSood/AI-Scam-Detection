@@ -1,68 +1,111 @@
-class RiskEngine:
+import time
+import logging
+from typing import Optional, Dict, Tuple
+
+logger = logging.getLogger("app.services.risk_engine")
+
+class EvidenceFusionEngine:
     """
-    Engine that combines voice deepfake analysis and content-based scam risk
-    to produce a unified risk score and security classification label.
+    Combines multiple independent signals into a single unified scam risk score
+    using a configurable, weighted evidence fusion layer.
+    
+    Guarantees:
+    - No single source alone determines the final classification.
+    - Deepfake probability increases suspicion but never triggers DANGER (scam state) alone.
+    - Low deepfake score never pulls down transcript-based risk.
     """
+    
+    # Configurable weights for each evidence component
+    # Sum of all weights = 1.0
+    WEIGHTS = {
+        "transcript": 0.40,      # Qwen LLM analysis
+        "deepfake": 0.20,        # AASIST voice anti-spoofing
+        "heuristics": 0.20,      # Tiered keyword scanner
+        "rag_match": 0.10,       # ChromaDB advisory match count
+        "verification": 0.10      # Caller response to verification questions
+    }
 
-    @staticmethod
-    def calculate_combined_risk(deepfake_prob: float, llm_risk_score: float, is_text_only: bool = False) -> tuple[float, str]:
+    @classmethod
+    def fuse_evidence(
+        cls,
+        transcript_risk: float,
+        deepfake_prob: Optional[float],
+        heuristic_risk: float,
+        advisories_count: int,
+        verification_verdict: str
+    ) -> Tuple[float, Dict[str, float]]:
         """
-        Combines deepfake probability and LLM transcription threat scores.
+        Merges 5 evidence dimensions into a raw fused score.
         
-        Weights:
-        - Voice Deepfake probability: 30% (0.3)
-        - Content LLM risk score: 70% (0.7)
-        
-        Overrides:
-        - If voice cloning is highly probable (> 0.8) and content risk is moderate (> 0.5),
-          force the classification to SCAM (risk score >= 0.9).
-        - If content risk is extremely high (> 0.95), force label to SCAM.
-        - If is_text_only is True (e.g. no audio is analyzed), bypass the voice clone 30% weight
-          and set threat directly to the content LLM score.
-        
-        Returns:
-            tuple[float, str]: (combined_risk_score, label)
-                Where combined_risk_score is between 0.0 and 1.0, 
-                and label is one of: "SAFE", "SUSPICIOUS", "SCAM"
-        """
-        # Ensure bounds
-        deepfake_prob = max(0.0, min(1.0, deepfake_prob))
-        llm_risk_score = max(0.0, min(1.0, llm_risk_score))
-
-        # 1. Base Weighted Score or Text-Only Bypass
-        if is_text_only:
-            combined = llm_risk_score
-        else:
-            combined = (deepfake_prob * 0.3) + (llm_risk_score * 0.7)
-
-        # 2. Apply Rule-Based Overrides
-        # Rule A: High-risk deepfake combined with scam content triggers automatic SCAM escalation
-        if not is_text_only and deepfake_prob > 0.8 and llm_risk_score > 0.5:
-            combined = max(combined, 0.95)
+        Args:
+            transcript_risk: Score from LLM (0.0 to 1.0)
+            deepfake_prob: Probability of synthetic voice (0.0 to 1.0, or None if failed)
+            heuristic_risk: Score from keyword tiers (0.0 to 1.0)
+            advisories_count: Number of semantically matched advisories
+            verification_verdict: EVASIVE, REFUSED, THREATENED, PLAUSIBLE, etc.
             
-        # Rule B: Extreme content threat triggers automatic SCAM escalation
-        if llm_risk_score > 0.95:
-            combined = max(combined, 0.98)
+        Returns:
+            Tuple[float, Dict[str, float]]: (fused_score, evidence_breakdown)
+        """
+        # 1. Map RAG matching to a score [0.0 - 1.0]
+        # 1 advisory = 0.5 strength, 2+ advisories = 1.0 strength
+        rag_score = min(1.0, advisories_count * 0.5)
+
+        # 2. Map verification response to a score [0.0 - 1.0]
+        if verification_verdict in ["EVASIVE", "REFUSED", "THREATENED"]:
+            verification_score = 1.0
+        else:
+            verification_score = 0.0
+
+        # 3. Handle missing components (e.g. if AASIST failed and returned None)
+        active_weights = dict(cls.WEIGHTS)
+        if deepfake_prob is None:
+            active_weights["deepfake"] = 0.0
+
+        total_weight = sum(active_weights.values())
+        if total_weight == 0:
+            total_weight = 1.0
+
+        # 4. Compute weighted sum
+        weighted_sum = (
+            transcript_risk * active_weights["transcript"] +
+            (deepfake_prob or 0.0) * active_weights["deepfake"] +
+            heuristic_risk * active_weights["heuristics"] +
+            rag_score * active_weights["rag_match"] +
+            verification_score * active_weights["verification"]
+        )
+        fused = weighted_sum / total_weight
+
+        # 5. Constraint A: A low deepfake score must NEVER pull down or reduce transcript-based risk
+        if deepfake_prob is not None:
+            fused = max(fused, transcript_risk)
+
+        # 6. Constraint B: Deepfake probability alone cannot classify a call as a scam.
+        # If the overall score crosses the DANGER threshold (>= 0.75), but both
+        # transcript content risk and keyword heuristics are low (< 0.40),
+        # cap the risk at 0.74 (keeping it in VERIFY mode).
+        if fused >= 0.75:
+            if transcript_risk < 0.40 and heuristic_risk < 0.40:
+                fused = 0.74
 
         # Round to 2 decimal places
-        combined = round(combined, 2)
+        fused_score = round(max(0.0, min(1.0, fused)), 2)
 
-        # 3. Classify Security Label
-        if combined >= 0.8:
-            label = "SCAM"
-        elif combined >= 0.4:
-            label = "SUSPICIOUS"
-        else:
-            label = "SAFE"
+        # Build intermediate breakdown dictionary
+        breakdown = {
+            "transcript": round(transcript_risk, 2),
+            "deepfake": round(deepfake_prob, 2) if deepfake_prob is not None else 0.0,
+            "heuristics": round(heuristic_risk, 2),
+            "rag_match": round(rag_score, 2),
+            "verification": round(verification_score, 2)
+        }
 
-        return combined, label
+        return fused_score, breakdown
 
-
-import time
 
 class AdaptiveRiskEngine:
     """
-    Stateful risk engine for live calls (Milestone 8).
+    Stateful risk engine for live calls.
     Tracks EMA smoothing, ratchet floor, confidence, and state machine with hysteresis.
     """
     def __init__(self):
@@ -76,7 +119,7 @@ class AdaptiveRiskEngine:
         self.verify_exit_low_start = None  # Start timestamp when risk < 0.35 sustained
         self.danger_exit_low_start = None  # Start timestamp when risk < 0.65 sustained
 
-    def process_cycle(self, risk_raw: float, word_count: int, llm_audits_done: int) -> tuple[float, float, str]:
+    def process_cycle(self, risk_raw: float, word_count: int, llm_audits_done: int) -> Tuple[float, float, str]:
         """
         Runs one cycle of the stateful risk engine:
         1. Smooth raw risk using EMA (alpha = 0.35)
@@ -85,11 +128,10 @@ class AdaptiveRiskEngine:
         4. Compute next mode with hysteresis
         
         Returns:
-            tuple[float, float, str]: (smoothed_risk, confidence, mode)
+            Tuple[float, float, str]: (smoothed_risk, confidence, mode)
         """
         # 1. EMA Smoothing
         alpha = 0.35
-        # If it's the very first cycle, initialize smoothed_risk directly to risk_raw
         if self.smoothed_risk == 0.0 and self.peak_smoothed == 0.0:
             self.smoothed_risk = risk_raw
         else:
@@ -104,7 +146,6 @@ class AdaptiveRiskEngine:
         self.smoothed_risk = round(max(0.0, min(1.0, self.smoothed_risk)), 2)
 
         # 3. Confidence Calculation
-        # confidence = min(1.0, words_heard / 120) * min(1.0, llm_audits_done / 2)
         word_factor = min(1.0, word_count / 120.0)
         audit_factor = min(1.0, llm_audits_done / 2.0)
         confidence = round(word_factor * audit_factor, 2)
@@ -122,17 +163,14 @@ class AdaptiveRiskEngine:
 
         # Apply state transitions with hysteresis
         if self.mode == "MONITOR":
-            # MONITOR -> VERIFY: Instant transition when risk >= 0.40
             if natural_mode in ["VERIFY", "DANGER"]:
                 self.mode = "VERIFY"
                 self.verify_exit_low_start = None
             
         elif self.mode == "VERIFY":
-            # VERIFY -> DANGER: Instant transition when risk >= 0.75
             if natural_mode == "DANGER":
                 self.mode = "DANGER"
                 self.danger_exit_low_start = None
-            # VERIFY -> MONITOR: Exits below 0.35 sustained for 15s
             elif self.smoothed_risk < 0.35:
                 if self.verify_exit_low_start is None:
                     self.verify_exit_low_start = now
@@ -143,7 +181,6 @@ class AdaptiveRiskEngine:
                 self.verify_exit_low_start = None
 
         elif self.mode == "DANGER":
-            # DANGER -> VERIFY: Exits below 0.65 sustained for 20s
             if self.smoothed_risk < 0.65:
                 if self.danger_exit_low_start is None:
                     self.danger_exit_low_start = now

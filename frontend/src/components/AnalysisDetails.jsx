@@ -11,7 +11,9 @@ const AnalysisDetails = ({ data }) => {
     scam_category,
     deepfake_probability,
     explanation,
-    advisories
+    advisories,
+    evidence_breakdown,
+    overall_confidence
   } = data;
 
   // Determine threat level class names
@@ -41,12 +43,64 @@ const AnalysisDetails = ({ data }) => {
             <div className="metric-tile deepfake-probability">
               <p>Voice Clone Prob</p>
               <span className={isDeepfakeHigh ? 'high' : 'low'}>
-                {Math.round(deepfake_probability * 100)}%
+                {deepfake_probability !== null ? `${Math.round(deepfake_probability * 100)}%` : 'N/A'}
               </span>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Evidence Breakdown Card */}
+      {evidence_breakdown && (
+        <div className="glass-panel evidence-breakdown-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' }}>
+            📊 Evidence Breakdown
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div className="evidence-item">
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Transcript Analysis</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                {Math.round(evidence_breakdown.transcript * 100)}%
+              </div>
+            </div>
+            <div className="evidence-item">
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>AI Voice Probability</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                {evidence_breakdown.deepfake !== null ? `${Math.round(evidence_breakdown.deepfake * 100)}%` : 'N/A'}
+              </div>
+            </div>
+            <div className="evidence-item">
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Scam Heuristic Score</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                {Math.round(evidence_breakdown.heuristics * 100)}%
+              </div>
+            </div>
+            <div className="evidence-item">
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>RBI Advisory Match</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
+                {Math.round(evidence_breakdown.rag_match * 100)}%
+              </div>
+            </div>
+            {evidence_breakdown.verification > 0.0 && (
+              <div className="evidence-item" style={{ gridColumn: 'span 2' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Verification Question Verdict Penalty</div>
+                <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--color-scam, #ef4444)' }}>
+                  +{Math.round(evidence_breakdown.verification * 100)}% (EVASIVE/REFUSED)
+                </div>
+              </div>
+            )}
+            <div className="evidence-item" style={{ gridColumn: 'span 2' }}>
+              <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.1)', margin: '0.25rem 0' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Overall Confidence</span>
+                <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--accent-purple, #8b5cf6)' }}>
+                  {Math.round((overall_confidence || 0) * 100)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Simulated Transcript Box */}
       <div className="glass-panel transcript-card">

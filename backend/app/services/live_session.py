@@ -1,9 +1,13 @@
 import time
+import logging
 import numpy as np
 from fastapi.concurrency import run_in_threadpool
 from app.services.streaming_transcriber import StreamingTranscriber
 from app.services.heuristic_scorer import HeuristicScorer
-from app.services.risk_engine import AdaptiveRiskEngine
+from app.services.deepfake_detector import AASISTDetector, DeepfakeResult
+from app.services.risk_engine import AdaptiveRiskEngine, EvidenceFusionEngine
+
+logger = logging.getLogger("app.services.live_session")
 
 class LiveSession:
     """
@@ -16,6 +20,7 @@ class LiveSession:
         self.session_id = session_id
         self.caller_number = caller_number
         self.accumulated_bytes = b""
+        self.pcm_buffer = np.array([], dtype=np.float32)
         
         self.committed_text = ""
         self.partial_text = ""
@@ -40,10 +45,28 @@ class LiveSession:
         self.llm_advisories = []
         self.llm_verdict = "N/A"
 
+        # AASIST Deepfake detection state
+        self.last_deepfake_result = DeepfakeResult(
+            probability=None,
+            label=None,
+            confidence=None,
+            model="AASIST",
+            latency_ms=0.0
+        )
+        self.last_breakdown = {
+            "transcript": 0.0,
+            "deepfake": 0.0,
+            "heuristics": 0.0,
+            "rag_match": 0.0,
+            "verification": 0.0
+        }
+
     async def process_text_cycle(self, committed: str, partial: str) -> dict:
         """
         Processes a client-side text chunk from browser-native Web Speech API,
         updating the transcript and computing risk scores in real-time.
+        Deepfake detection is handled separately by process_audio_only() when
+        background MediaRecorder audio is available.
         """
         self.committed_text = committed
         self.partial_text = partial
@@ -55,15 +78,55 @@ class LiveSession:
         heuristic_result = HeuristicScorer.score(full_transcript)
         return await self._evaluate_risk_and_llm(full_transcript, heuristic_result.trigger_llm)
 
+    async def process_audio_only(self, audio_bytes: bytes) -> None:
+        """
+        AASIST-only analysis path for webspeech hybrid mode.
+        Called when a 0xDF-tagged audio frame arrives from the background MediaRecorder.
+        Runs AASIST deepfake detection on the real audio bytes and updates
+        last_deepfake_result WITHOUT re-running Whisper STT or risk fusion.
+        The next text_chunk cycle will pick up the updated deepfake result automatically.
+        """
+        if not audio_bytes or len(audio_bytes) < 1000:
+            return
+        full_transcript = self.committed_text + " " + self.partial_text
+        self.last_deepfake_result = await run_in_threadpool(
+            AASISTDetector.detect,
+            audio_bytes,
+            None,               # No filename in live streams
+            full_transcript.strip() or None
+        )
+        logger.debug(
+            f"[process_audio_only] AASIST result: "
+            f"prob={self.last_deepfake_result.probability} label={self.last_deepfake_result.label}"
+        )
+
     async def process_cycle(self, new_chunk: bytes) -> dict:
         """
-        Appends the new binary audio chunk, decodes the full stream, transcribes the active
-        PCM block in a worker threadpool, commits the active block text when it exceeds 30s,
-        and computes the smoothed risk score.
+        Appends the new binary audio chunk (detecting raw float32 PCM vs container WebM),
+        decodes/handles it, transcribes the active PCM block, and computes the risk score.
         """
-        self.accumulated_bytes += new_chunk
-        pcm_data = await run_in_threadpool(self.transcriber.decode_to_pcm, self.accumulated_bytes)
+        if not new_chunk:
+            return self._build_update(
+                risk_raw=0.1,
+                risk_smoothed=0.1,
+                confidence=0.0,
+                mode="MONITOR",
+                red_flags=[],
+                trigger_llm=False
+            )
+
+        # Detect WebM vs raw float32 PCM (WebM files start with EBML header b'\x1a\x45\xdf\xa3')
+        is_webm = new_chunk.startswith(b'\x1a\x45\xdf\xa3') or (len(self.accumulated_bytes) > 0)
         
+        if is_webm:
+            self.accumulated_bytes += new_chunk
+            pcm_data = await run_in_threadpool(self.transcriber.decode_to_pcm, self.accumulated_bytes)
+        else:
+            # Direct raw float32 PCM from browser AudioContext
+            pcm_chunk = np.frombuffer(new_chunk, dtype=np.float32)
+            self.pcm_buffer = np.concatenate([self.pcm_buffer, pcm_chunk])
+            pcm_data = self.pcm_buffer
+
         if pcm_data is None or pcm_data.size == 0:
             return self._build_update(
                 risk_raw=0.1,
@@ -86,6 +149,19 @@ class LiveSession:
         full_transcript = self.committed_text
         if self.partial_text:
             full_transcript += (" " if full_transcript else "") + self.partial_text
+
+        # Extract current cycle PCM for AASIST anti-spoofing analysis
+        if is_webm:
+            current_cycle_pcm = pcm_data[-80000:] if pcm_data.size >= 80000 else pcm_data
+        else:
+            current_cycle_pcm = pcm_chunk
+
+        self.last_deepfake_result = await run_in_threadpool(
+            AASISTDetector.detect, 
+            current_cycle_pcm, 
+            None, 
+            full_transcript
+        )
             
         heuristic_result = HeuristicScorer.score(full_transcript)
         return await self._evaluate_risk_and_llm(full_transcript, heuristic_result.trigger_llm)
@@ -139,15 +215,16 @@ class LiveSession:
             except Exception as e:
                 print(f"Error in incremental LLM audit: {e}")
 
-        # Blend Raw Risk: max of heuristics and latest LLM audit score
-        risk_raw = max(HeuristicScorer.score(full_transcript).risk, self.last_llm_risk)
-
-        # Apply Question Response Verdict adjustments:
-        # EVASIVE/REFUSED/THREATENED -> +0.20; PLAUSIBLE -> -0.05
-        if self.llm_verdict in ["EVASIVE", "REFUSED", "THREATENED"]:
-            risk_raw = min(1.0, risk_raw + 0.20)
-        elif self.llm_verdict == "PLAUSIBLE":
-            risk_raw = max(0.0, risk_raw - 0.05)
+        # Run Evidence Fusion: combine Qwen content, AASIST voice deepfake, heuristics, RAG match, and verdict
+        heuristic_result = HeuristicScorer.score(full_transcript)
+        
+        risk_raw, self.last_breakdown = EvidenceFusionEngine.fuse_evidence(
+            transcript_risk=self.last_llm_risk,
+            deepfake_prob=self.last_deepfake_result.probability,
+            heuristic_risk=heuristic_result.risk,
+            advisories_count=len(self.llm_advisories),
+            verification_verdict=self.llm_verdict
+        )
 
         # Run AdaptiveRiskEngine (EMA, ratchet, confidence, state machine)
         smoothed_risk, confidence, mode = self.risk_engine.process_cycle(
@@ -156,7 +233,6 @@ class LiveSession:
             llm_audits_done=self.llm_audits_done
         )
 
-        heuristic_result = HeuristicScorer.score(full_transcript)
         combined_red_flags = list(set(heuristic_result.tier_hits + self.llm_red_flags))
 
         return self._build_update(
@@ -207,5 +283,11 @@ class LiveSession:
             "suggested_questions": suggested_questions,
             "safe_actions": safe_actions,
             "advisories": advisories_json,
-            "trigger_llm": trigger_llm
+            "trigger_llm": trigger_llm,
+            "deepfake_probability": self.last_deepfake_result.probability,
+            "deepfake_label": self.last_deepfake_result.label,
+            "deepfake_confidence": self.last_deepfake_result.confidence,
+            "deepfake_model": self.last_deepfake_result.model,
+            "evidence_breakdown": self.last_breakdown,
+            "overall_confidence": confidence
         }

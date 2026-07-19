@@ -13,6 +13,6 @@ class CallLog(Base):
     risk_score = Column(Float, nullable=False)
     label = Column(String(50), nullable=False)  # SAFE, SUSPICIOUS, SCAM
     scam_category = Column(String(100), nullable=False)
-    deepfake_probability = Column(Float, nullable=False)
+    deepfake_probability = Column(Float, nullable=True)
     explanation = Column(Text, nullable=False)
     analyzed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
