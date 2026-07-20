@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 // Live coaching card (M8). The server's state machine decides the mode and
 // what guidance to send (schemas.py LiveUpdate) — this component only renders
@@ -25,6 +25,7 @@ const MODE_META = {
 };
 
 const CoachPanel = ({ update }) => {
+  const [reactionLogged, setReactionLogged] = useState(null);
   const mode = update?.mode || 'MONITOR';
   const meta = MODE_META[mode] || MODE_META.MONITOR;
   const redFlags = update?.red_flags || [];
@@ -56,8 +57,56 @@ const CoachPanel = ({ update }) => {
         <p className="coach-fallback">{meta.fallback}</p>
       ) : null}
 
+      {/* Interactive caller reaction feedback buttons in VERIFY mode */}
+      {mode === 'VERIFY' && (
+        <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontWeight: 600 }}>
+            How did the caller react when you asked?
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setReactionLogged('EVASIVE')}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.35rem 0.65rem',
+                borderRadius: '0.375rem',
+                background: reactionLogged === 'EVASIVE' ? 'var(--color-scam)' : 'rgba(239,68,68,0.15)',
+                border: '1px solid var(--color-scam, #ef4444)',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
+            >
+              🛑 Caller Refused / Evasive
+            </button>
+            <button
+              type="button"
+              onClick={() => setReactionLogged('THREATENED')}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.35rem 0.65rem',
+                borderRadius: '0.375rem',
+                background: reactionLogged === 'THREATENED' ? 'var(--color-scam)' : 'rgba(239,68,68,0.15)',
+                border: '1px solid var(--color-scam, #ef4444)',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 500
+              }}
+            >
+              🤬 Caller Became Hostile / Angry
+            </button>
+          </div>
+          {reactionLogged && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-scam, #ef4444)', marginTop: '0.5rem', fontWeight: 600 }}>
+              ⚠️ High Risk Confirmed: Evasive or hostile reaction indicates a scam call. Hang up immediately!
+            </div>
+          )}
+        </div>
+      )}
+
       {redFlags.length > 0 && (
-        <div>
+        <div style={{ marginTop: '0.85rem' }}>
           <p className="red-flag-heading">Red flags heard on this call</p>
           <div className="red-flag-chips">
             {redFlags.map((flag, idx) => (

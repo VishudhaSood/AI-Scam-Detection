@@ -22,6 +22,51 @@ const AnalysisDetails = ({ data }) => {
     return 'risk-badge scam';
   };
 
+  const handleDownloadComplaint = () => {
+    const reportText = `======================================================================
+INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
+National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+======================================================================
+
+Date & Time: ${new Date().toLocaleString()}
+Threat Evaluation Label: ${label} (Risk Score: ${Math.round(risk_score * 100)}%)
+Detected Scam Category: ${scam_category}
+Overall Evidence Confidence: ${Math.round((overall_confidence || 0) * 100)}%
+
+----------------------------------------------------------------------
+EXECUTIVE SUMMARY & REASONING
+----------------------------------------------------------------------
+${explanation}
+
+----------------------------------------------------------------------
+INCIDENT TRANSCRIPT EXCERPT
+----------------------------------------------------------------------
+"${transcript}"
+
+----------------------------------------------------------------------
+MATCHED REGULATORY ADVISORIES & WARNINGS
+----------------------------------------------------------------------
+${advisories && advisories.length > 0
+  ? advisories.map(a => `- [${a.source}] ${a.title}\n  Details: ${a.description}`).join('\n\n')
+  : 'No specific regulatory advisories matched.'}
+
+----------------------------------------------------------------------
+RECOMMENDED DEFENSIVE ACTIONS
+----------------------------------------------------------------------
+1. Do NOT transfer any money or pay any "settlement fees" or "processing charges".
+2. Do NOT share OTPs, PINs, bank passwords, or Aadhaar details over the call.
+3. If money has already been transferred, report immediately to Helpline 1930 within the golden hour to freeze recipient bank accounts.
+4. File an official complaint on https://cybercrime.gov.in and attach this transcript audit report as evidence.
+======================================================================`;
+
+    const element = document.createElement("a");
+    const file = new Blob([reportText], { type: 'text/plain' });
+    element.href = URL.createObjectURL(file);
+    element.download = `Cybercrime_Complaint_Draft_${Date.now()}.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
 
   return (
     <div className="results-container">
@@ -45,6 +90,28 @@ const AnalysisDetails = ({ data }) => {
               </span>
             </div>
           </div>
+
+          {(label === 'SCAM' || label === 'SUSPICIOUS') && (
+            <button
+              type="button"
+              onClick={handleDownloadComplaint}
+              className="submit-btn"
+              style={{
+                marginTop: '1rem',
+                fontSize: '0.8rem',
+                padding: '0.5rem 1rem',
+                background: 'rgba(239, 68, 68, 0.2)',
+                border: '1px solid var(--color-scam, #ef4444)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              📥 Download Complaint Draft (1930)
+            </button>
+          )}
         </div>
       </div>
 

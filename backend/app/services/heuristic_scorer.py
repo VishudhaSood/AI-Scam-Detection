@@ -10,6 +10,7 @@ NEGATION_PATTERNS = [
     r"\bwouldn'?t\b", r"\brefuse\s+to\b", r"\bwarning\s+about\b",
     r"\bnot\s+share\b", r"\bnot\s+give\b", r"\bavoid\b",
     r"\bdon'?t\s+share\b", r"\bdon'?t\s+give\b",
+    r"\bmat\s+do\b", r"\bmat\s+dena\b", r"\bmat\s+batao\b",
 ]
 
 # Pre-compiled negation regex: matches if any negation appears in a short window
@@ -45,7 +46,7 @@ class HeuristicScorer:
     """
     Scorer service running tiered keyword analyses on conversation text.
     Executes instantly on the CPU, providing raw risk hints for the streaming cycle.
-    Now includes negation awareness to avoid false positives on safety warnings.
+    Includes negation awareness and multilingual Hinglish scam keyword scanning.
     """
 
     # Tier 3 (Risk: 0.85 - 0.98): Extreme threat indicators triggering immediate LLM audit
@@ -55,9 +56,13 @@ class HeuristicScorer:
         r"\btransfer[- ]money\b", r"\bsend[- ]money\b", r"\bdeposit[- ]fee\b", r"\bprocessing[- ]fee\b",
         r"\bpayment\b", r"\barreste?d?\b", r"\bwarrant\b", r"\bcbi\b", r"\bpolice[- ]custody\b",
         r"\bcontraband\b", r"\billegal[- ]package\b",
-        # Digital Arrest specific
+        # Digital Arrest & Law Enforcement specific
         r"\bdigital[- ]arrest\b", r"\bcyber[- ]police\b", r"\bcyber[- ]cell\b",
         r"\bnarcotics\b", r"\bsettlement[- ]fee\b",
+        # Hinglish scam indicators
+        r"\bpaisa[- ]transfer\b", r"\bpaise[- ]bhejo\b", r"\bgiraftari\b",
+        r"\bpolice[- ]aayegi\b", r"\barrest[- ]kar\b", r"\bpenalty[- ]bharna\b",
+        r"\bkhata[- ]block\b",
     ]
 
     # Tier 2 (Risk: 0.50 - 0.74): Medium threat signals of identity fraud and baiting
@@ -66,15 +71,19 @@ class HeuristicScorer:
         r"\bblock(?:ed)?\b", r"\bcard[- ]blocked\b", r"\bverification\b", r"\blottery\b", r"\bprize\b",
         r"\blucky[- ]draw\b", r"\bcrore\b", r"\blakh\b", r"\bwin\b", r"\bcustoms\b",
         r"\bfedex\b", r"\bdhl\b", r"\bcourier\b", r"\billegal\b",
-        # Digital Arrest related
+        # Digital Arrest & Regional variants
         r"\bfake[- ]warrant\b", r"\bvideo[- ]call[- ]arrest\b",
+        r"\bkhata\b", r"\binam\b", r"\blottery[- ]lagi\b", r"\bpaise[- ]jeete\b",
+        r"\bbijli[- ]bill\b", r"\bpower[- ]cut\b",
     ]
 
     # Tier 1 (Risk: 0.20 - 0.49): Urgency-building keywords and pressure language
     TIER_1_KEYWORDS = [
         r"\burgent\b", r"\bdo[n']t[- ]tell[- ]anyone\b", r"\bkeep[- ]it[- ]secret\b",
         r"\bconfidential\b", r"\bemergency\b", r"\bcritical\b", r"\bimmediately\b",
-        r"\bnow\b", r"\bwithin[- ]1[- ]hour\b"
+        r"\bnow\b", r"\bwithin[- ]1[- ]hour\b",
+        # Hinglish urgency words
+        r"\babhi\b", r"\bjaldi\b", r"\bkisi[- ]ko[- ]mat[- ]batao\b", r"\bgupt\b",
     ]
 
     @classmethod

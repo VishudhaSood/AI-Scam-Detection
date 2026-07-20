@@ -9,3 +9,23 @@ CONTENT: The RBI has issued guidelines to caution bank customers against fake ca
 TITLE: RBI Caution on Unauthorized Digital Lending and Loan Apps
 SOURCE: Reserve Bank of India (RBI)
 CONTENT: The RBI warns members of the public against signing up for unauthorized digital lending apps that promise instant, paperless loans without credit checks. These platforms often charge usurious interest rates, hidden processing fees, and employ illegal, aggressive recovery tactics. Some callers masquerade as recovery agents or bank representatives, requesting bank transfers, processing fees, or threat-based repayments. The RBI advises customers to verify that any lending service is registered as a bank or Non-Banking Financial Company (NBFC) before sharing personal documents or making transfers.
+
+TITLE: SEBI & RBI Advisory on Fake Stock Market Trading Apps, Mutual Fund Tips & Guaranteed IPO Allotment Scams
+SOURCE: Reserve Bank of India (RBI) / SEBI
+CONTENT: RBI and SEBI warn investors against fraudsters creating fake stock trading apps, cloned mutual fund investment portals, and WhatsApp/Telegram stock tip groups. Scammers promise guaranteed daily stock returns of 10% to 50%, exclusive pre-IPO allotments, or insider mutual fund tips. They trick investors into depositing funds into personal or shell company bank accounts instead of SEBI-registered brokers. Investors are advised never to transfer money for stock market trading or mutual funds to personal accounts or unverified trading applications.
+
+TITLE: IRDAI & RBI Caution on Unclaimed Insurance Policy Bonus and Lapsed Policy Maturity Refunds
+SOURCE: Reserve Bank of India (RBI) / IRDAI
+CONTENT: RBI and IRDAI issue a public warning against callers posing as insurance company executives or IRDAI officers claiming that an old or lapsed insurance policy has accrued an unclaimed bonus of lakhs of rupees. The scammer tells the victim that to release the accumulated bonus or maturity amount, they must pay a mandatory "processing tax", "GST clearance fee", or purchase a new policy. IRDAI clarifies that it does not hold individual policy funds, never calls policyholders to distribute bonuses, and never collects fees to release maturity claims.
+
+TITLE: RBI & FIU-IND Caution on Unauthorized Cryptocurrency Exchanges and Crypto Mining Pool Schemes
+SOURCE: Reserve Bank of India (RBI) / FIU-IND
+CONTENT: The RBI and Financial Intelligence Unit (FIU-IND) warn the public against investing in illegal cryptocurrency trading platforms, bogus bitcoin mining pools, and high-yield digital asset schemes. Fraudsters lure victims via Instagram or Telegram ads showing fake profit screenshots and demand crypto deposits or bank transfers. Once funds are deposited, the platform freezes withdrawals and demands a "tax clearance fee" to unlock funds. Citizens are advised that crypto assets carry extreme financial risk and unauthorized platforms are used for money laundering and fraud.
+
+TITLE: EPFO & RBI Advisory on Fake Provident Fund (PF) Withdrawal Assistance and Pension Fees
+SOURCE: Reserve Bank of India (RBI) / EPFO
+CONTENT: RBI and EPFO caution employees against fraudsters offering illegal assistance for instant Provident Fund (PF) withdrawal, pension clearance, or UAN unblocking. Scammers demand processing fees via UPI or request Universal Account Number (UAN) login credentials and OTPs. EPFO confirms that PF claims can only be filed through the official Member Sewa Portal (unifiedportal-mem.epfindia.gov.in) and no fees are required for online claim processing.
+
+TITLE: RBI Caution on Credit Card Limit Enhancement, Reward Points & Zero-Percent EMI Fraud
+SOURCE: Reserve Bank of India (RBI)
+CONTENT: The RBI warns credit cardholders against fake calls offering free credit card limit increases, zero-cost EMI conversions, or instant cashback on reward points. Scammers direct victims to fake banking web forms that capture credit card numbers, expiry dates, CVV codes, and One-Time Passwords (OTPs). The RBI reiterates that banks never request CVV codes or OTPs to upgrade credit limits or convert purchases to EMIs.

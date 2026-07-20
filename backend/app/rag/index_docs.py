@@ -10,6 +10,76 @@ from app.rag.vector_store import VectorStoreManager
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 KB_DIR = os.path.join(os.path.dirname(BACKEND_DIR), "knowledge_base")
 
+def get_official_url(source: str) -> str:
+    """
+    Maps the advisory source name to its official portal URL across 30+ major Indian banks.
+    """
+    src_lower = source.lower()
+    if "sbi" in src_lower or "state bank of india" in src_lower:
+        return "https://bank.sbi"
+    elif "hdfc" in src_lower:
+        return "https://www.hdfcbank.com"
+    elif "icici" in src_lower:
+        return "https://www.icicibank.com"
+    elif "axis" in src_lower:
+        return "https://www.axisbank.com"
+    elif "kotak" in src_lower:
+        return "https://www.kotak.com"
+    elif "indusind" in src_lower:
+        return "https://www.indusind.com"
+    elif "yes bank" in src_lower:
+        return "https://www.yesbank.in"
+    elif "idfc" in src_lower:
+        return "https://www.idfcfirstbank.com"
+    elif "canara" in src_lower:
+        return "https://canarabank.com"
+    elif "union bank" in src_lower:
+        return "https://www.unionbankofindia.co.in"
+    elif "bank of india" in src_lower or "boi" in src_lower:
+        return "https://bankofindia.co.in"
+    elif "baroda" in src_lower:
+        return "https://www.bankofbaroda.in"
+    elif "pnb" in src_lower or "punjab national bank" in src_lower:
+        return "https://www.pnbindia.in"
+    elif "federal" in src_lower:
+        return "https://www.federalbank.co.in"
+    elif "bandhan" in src_lower:
+        return "https://bandhanbank.com"
+    elif "idbi" in src_lower:
+        return "https://www.idbibank.in"
+    elif "maharashtra" in src_lower:
+        return "https://bankofmaharashtra.in"
+    elif "punjab & sind" in src_lower or "punjab and sind" in src_lower:
+        return "https://punjabandsindbank.co.in"
+    elif "uco bank" in src_lower:
+        return "https://www.ucobank.com"
+    elif "indian overseas bank" in src_lower or "iob" in src_lower:
+        return "https://www.iob.in"
+    elif "indian bank" in src_lower:
+        return "https://www.indianbank.in"
+    elif "central bank" in src_lower:
+        return "https://www.centralbankofindia.co.in"
+    elif "rbl" in src_lower:
+        return "https://www.rblbank.com"
+    elif "south indian" in src_lower:
+        return "https://www.southindianbank.com"
+    elif "karur vysya" in src_lower or "kvb" in src_lower:
+        return "https://www.kvb.co.in"
+    elif "city union" in src_lower:
+        return "https://www.cityunionbank.com"
+    elif "karnataka bank" in src_lower:
+        return "https://karnatakabank.com"
+    elif "tamilnad mercantile" in src_lower or "tmb" in src_lower:
+        return "https://www.tmb.in"
+    elif "india post" in src_lower or "ippb" in src_lower:
+        return "https://www.ippbonline.com"
+    elif "au small" in src_lower or "au bank" in src_lower:
+        return "https://www.aubank.in"
+    elif "rbi" in src_lower or "reserve bank" in src_lower:
+        return "https://www.rbi.org.in"
+    else:
+        return "https://www.cert-in.org.in"
+
 def parse_advisories(file_path: str):
     """
     Parses a seed advisory text file.
@@ -41,8 +111,7 @@ def parse_advisories(file_path: str):
                 text_content = line.replace("CONTENT:", "").strip()
         
         if title and source and text_content:
-            # Map standard URLs based on source
-            url = "https://www.rbi.org.in" if "rbi" in source.lower() else "https://www.cert-in.org.in"
+            url = get_official_url(source)
             
             parsed_items.append({
                 "title": title,
@@ -56,13 +125,13 @@ def parse_advisories(file_path: str):
 
 def index_all_documents():
     """
-    Reads files from the knowledge base, computes vector embeddings, and indexes them into ChromaDB.
+    Reads files from the knowledge base, computes vector embeddings, and indexes them into ChromaDB / Fallback store.
     """
-    print("Initializing ChromaDB collection...")
+    print("Initializing Vector DB collection...")
     collection = VectorStoreManager.get_collection()
     
     # Files to parse
-    files_to_index = ["rbi_advisories.txt", "cert_advisories.txt"]
+    files_to_index = ["rbi_advisories.txt", "cert_advisories.txt", "bank_advisories.txt"]
     all_advisories = []
     
     for filename in files_to_index:
@@ -75,7 +144,7 @@ def index_all_documents():
         print("No documents found to index.")
         return
         
-    print(f"Loaded {len(all_advisories)} advisories. Upserting to ChromaDB...")
+    print(f"Loaded {len(all_advisories)} advisories across RBI, CERT-In, and major banks. Upserting to Vector DB...")
     
     # Prepare packages for ChromaDB ingestion
     documents = []

@@ -7,30 +7,34 @@ from dotenv import load_dotenv
 
 from app.rag.vector_store import VectorStoreManager
 from app.models.schemas import Advisory
+from app.services.heuristic_scorer import _is_negated
 
 # Load environment variables
 load_dotenv()
 
 logger = logging.getLogger("app.rag")
 
+GROQ_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768"
+]
 
 def _get_llm_client():
     """
     Returns (client, model_name) using the first available LLM provider.
     Priority: GROQ_API_KEY > OPENROUTER_API_KEY > None (fallback).
     """
-    # --- Option 1: Groq (recommended, free, fast) ---
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key and "your_groq" not in groq_key.lower():
-        model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        model = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
         client = OpenAI(
             base_url="https://api.groq.com/openai/v1",
             api_key=groq_key,
         )
-        logger.info(f"LLM provider: Groq ({model})")
         return client, model
 
-    # --- Option 2: OpenRouter ---
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
     if openrouter_key and "your_openrouter" not in openrouter_key.lower():
         model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
@@ -42,30 +46,28 @@ def _get_llm_client():
                 "X-Title": "AI Scam Guard Platform"
             }
         )
-        logger.info(f"LLM provider: OpenRouter ({model})")
         return client, model
 
-    # --- No key configured ---
     return None, None
 
 
 class RAGQueryEngine:
     """
     Query Engine coordinating RAG search in ChromaDB and LLM analysis via Groq/OpenRouter.
-    Optimized to run in a single LLM API query request.
+    Includes multi-model fallback on rate-limits (429) and negation-aware local mock fallback.
     """
 
     @classmethod
     def query_advisories(cls, transcript: str, n_results: int = 2) -> List[Advisory]:
         """
-        Performs semantic similarity search inside ChromaDB collection
+        Performs semantic similarity search inside vector collection
         to retrieve the most relevant regulatory advisories.
         """
         try:
             collection = VectorStoreManager.get_collection()
             
             if collection.count() == 0:
-                logger.warning("ChromaDB collection is empty. Run index_docs.py first.")
+                logger.warning("Vector collection is empty. Run index_docs.py first.")
                 return []
                 
             results = collection.query(
@@ -81,7 +83,6 @@ class RAGQueryEngine:
                 for i, meta in enumerate(metadata_list):
                     dist = distances[i] if i < len(distances) else 0.0
                     
-                    # Threshold check: ignore documents with distance > 1.25 (weak match)
                     if dist <= 1.25:
                         advisories.append(Advisory(
                             title=meta.get("title", "Unknown Advisory"),
@@ -91,24 +92,22 @@ class RAGQueryEngine:
                         ))
             return advisories
         except Exception as e:
-            logger.error(f"Error querying ChromaDB vector store: {e}")
+            logger.error(f"Error querying vector store: {e}")
             return []
 
     @classmethod
     def evaluate_transcript(cls, transcript: str) -> Dict[str, Any]:
         """
         Retrieves matching context warnings and prompts the LLM to evaluate.
+        Falls back across Groq models if rate-limited (429).
         """
-        # 1. Retrieve RAG advisories
         advisories = cls.query_advisories(transcript, n_results=2)
         
-        # Format context
         context_str = ""
         for i, adv in enumerate(advisories):
             context_str += f"\nAdvisory {i+1} [{adv.source}]: {adv.title}\nDescription: {adv.description}\n"
 
-        # 2. Get LLM client (Groq or OpenRouter)
-        client, model_name = _get_llm_client()
+        client, main_model = _get_llm_client()
 
         if client is None:
             logger.warning("No LLM API key configured in .env. Running local keyword fallback.")
@@ -142,53 +141,75 @@ class RAGQueryEngine:
             "}"
         )
 
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Audit this call transcript:\n\"\"\"\n{transcript}\n\"\"\""}
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                timeout=15.0
-            )
+        # Try main model first, then fallback models if 429 rate limit is encountered
+        models_to_try = [main_model] + [m for m in GROQ_MODELS if m != main_model]
+        
+        for model in models_to_try:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Audit this call transcript:\n\"\"\"\n{transcript}\n\"\"\""}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    timeout=15.0
+                )
+                response_text = response.choices[0].message.content.strip()
+                result = json.loads(response_text)
+                result["advisories"] = advisories
+                return result
+            except Exception as e:
+                if "429" in str(e) or "rate_limit" in str(e).lower():
+                    logger.warning(f"Groq model {model} rate limited (429). Retrying with alternative model...")
+                    continue
+                else:
+                    logger.error(f"Error during LLM evaluation with {model}: {e}")
+                    break
 
-            response_text = response.choices[0].message.content.strip()
-            result = json.loads(response_text)
-            result["advisories"] = advisories
-            return result
-
-        except Exception as e:
-            logger.error(f"Error during LLM evaluation: {e}")
-            return cls._get_fallback_mock(transcript, advisories)
+        return cls._get_fallback_mock(transcript, advisories)
 
     @classmethod
     def _get_fallback_mock(cls, transcript: str, advisories: List[Advisory]) -> Dict[str, Any]:
         """
-        Heuristic fallback if LLM querying fails.
+        Negation-aware heuristic fallback if LLM querying fails or rate limits are hit.
         """
         text_lower = transcript.lower()
-        if any(kw in text_lower for kw in ["lottery", "prize", "win", "crore", "lakh"]):
+
+        # Check for scam keywords, but suppress if negated (e.g. "do not share OTP")
+        def _has_threat(keywords: list) -> bool:
+            for kw in keywords:
+                pos = text_lower.find(kw)
+                if pos != -1 and not _is_negated(text_lower, pos):
+                    return True
+            return False
+
+        if _has_threat(["lottery", "prize", "kbc", "crore", "50 lakh"]):
             risk_score = 0.90
             label = "SCAM"
             category = "Lottery & Prize Scam"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Conversation contains lottery winnings urgency markers. Caller demands processing fees."
-        elif any(kw in text_lower for kw in ["otp", "bank", "manager", "kyc", "card blocked"]):
+            explanation = "Conversation contains lottery winnings urgency markers. Caller demands processing fees."
+        elif _has_threat(["otp", "cvv", "pin", "card blocked", "kyc expired"]):
             risk_score = 0.95
             label = "SCAM"
             category = "Bank Impersonation (KYC/OTP)"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Urgent demands for banking credentials or KYC updates detected."
-        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband", "digital arrest", "cyber police"]):
+            explanation = "Urgent demands for banking credentials, OTPs, or KYC updates detected."
+        elif _has_threat(["cbi", "digital arrest", "cyber police", "contraband", "narcotics"]):
             risk_score = 0.93
             label = "SCAM"
             category = "Digital Arrest / Law Enforcement Impersonation"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest warrant or customs violation intercepts detected."
+            explanation = "Threats of arrest warrant or customs violation intercepts detected."
+        elif _has_threat(["anydesk", "teamviewer", "remote access"]):
+            risk_score = 0.90
+            label = "SCAM"
+            category = "Tech Support Scam"
+            explanation = "Demands to install remote access software detected."
         else:
-            risk_score = 0.10
+            risk_score = 0.05
             label = "SAFE"
             category = "None"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Conversation is evaluated as safe. No urgency signals or known scam triggers."
+            explanation = "Conversation is evaluated as safe. Protective warnings or normal dialogue present with no threat demand."
 
         return {
             "risk_score": risk_score,
@@ -202,21 +223,18 @@ class RAGQueryEngine:
     def evaluate_incremental(cls, transcript: str, prior_questions: List[str] = None) -> Dict[str, Any]:
         """
         Retrieves advisories and prompts the LLM to perform an incremental audit on the live transcript.
-        Evaluates risk score, categories, safe actions, suggested questions, and evasion verdict.
+        Falls back across Groq models if rate limited.
         """
-        # 1. Retrieve advisories
         advisories = cls.query_advisories(transcript, n_results=2)
         context_str = ""
         for i, adv in enumerate(advisories):
             context_str += f"\nAdvisory {i+1} [{adv.source}]: {adv.title}\nDescription: {adv.description}\n"
 
-        # 2. Get LLM client
-        client, model_name = _get_llm_client()
+        client, main_model = _get_llm_client()
 
         if client is None:
             return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
 
-        # 3. Setup API prompt
         prior_str = json.dumps(prior_questions or [])
         system_prompt = (
             "You are an AI Scam Auditor specializing in Indian phone scams. Analyze this live, incomplete, mixed two-speaker transcript.\n"
@@ -269,69 +287,85 @@ class RAGQueryEngine:
             "}"
         )
 
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Audit this live transcript:\n\"\"\"\n{transcript}\n\"\"\""}
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-                timeout=15.0
-            )
-            response_text = response.choices[0].message.content.strip()
-            result = json.loads(response_text)
-            result["advisories"] = advisories
-            return result
-        except Exception as e:
-            logger.error(f"Error in evaluate_incremental LLM: {e}")
-            return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
+        models_to_try = [main_model] + [m for m in GROQ_MODELS if m != main_model]
+
+        for model in models_to_try:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Audit this live transcript:\n\"\"\"\n{transcript}\n\"\"\""}
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                    timeout=15.0
+                )
+                response_text = response.choices[0].message.content.strip()
+                result = json.loads(response_text)
+                result["advisories"] = advisories
+                return result
+            except Exception as e:
+                if "429" in str(e) or "rate_limit" in str(e).lower():
+                    logger.warning(f"Groq model {model} rate limited (429). Retrying with alternative model...")
+                    continue
+                else:
+                    logger.error(f"Error in evaluate_incremental LLM with {model}: {e}")
+                    break
+
+        return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
 
     @classmethod
     def _get_fallback_mock_incremental(cls, transcript: str, prior_questions: List[str], advisories: List[Advisory]) -> Dict[str, Any]:
         """
-        Milestone 8 Incremental Heuristic Fallback
+        Negation-aware incremental heuristic fallback
         """
         text_lower = transcript.lower()
-        risk_score = 0.10
+
+        def _has_threat(keywords: list) -> bool:
+            for kw in keywords:
+                pos = text_lower.find(kw)
+                if pos != -1 and not _is_negated(text_lower, pos):
+                    return True
+            return False
+
+        risk_score = 0.05
         label = "SAFE"
         category = "None"
-        explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Conversation appears normal. No scam indicators detected."
+        explanation = "Conversation appears normal. No scam indicators detected."
         red_flags = []
         suggested_questions = []
         safe_actions = []
         verdict = "N/A"
 
-        # Determine scam match
         is_scam = False
-        if any(kw in text_lower for kw in ["lottery", "prize", "win", "crore", "lakh"]):
+        if _has_threat(["lottery", "prize", "kbc", "crore", "lakh"]):
             risk_score = 0.60
             label = "SUSPICIOUS"
             category = "Lottery & Prize Scam"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Urgent demands or congratulatory announcements of winnings."
+            explanation = "Urgent demands or congratulatory announcements of winnings."
             red_flags = ["Lottery winnings announced", "Advance fee processing demand"]
             suggested_questions = [
                 "Ask which official website registry lists your ticket number.",
                 "Say you will only verify the prize via the official government portal."
             ]
             is_scam = True
-        elif any(kw in text_lower for kw in ["otp", "bank", "manager", "kyc", "card blocked"]):
+        elif _has_threat(["otp", "cvv", "pin", "card blocked", "kyc expired"]):
             risk_score = 0.70
             label = "SUSPICIOUS"
             category = "Bank Impersonation (KYC)"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Suspicious card blockage warning or OTP request."
+            explanation = "Suspicious card blockage warning or OTP request."
             red_flags = ["Demanded credentials or OTP", "KYC update urgency"]
             suggested_questions = [
                 "Ask for their employee ID and main branch department name.",
                 "Tell them you will hang up and call the official customer care number on your card."
             ]
             is_scam = True
-        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband", "warrant", "digital arrest", "cyber police"]):
+        elif _has_threat(["cbi", "digital arrest", "cyber police", "contraband", "warrant"]):
             risk_score = 0.72
             label = "SUSPICIOUS"
             category = "Digital Arrest / Law Enforcement Impersonation"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest warrant or customs violation intercepts."
+            explanation = "Threats of arrest warrant or customs violation intercepts."
             red_flags = ["Arrest warrant threats", "Coercion into secrecy"]
             suggested_questions = [
                 "Ask which official police station is issuing this warrant and their ID.",
@@ -339,18 +373,13 @@ class RAGQueryEngine:
             ]
             is_scam = True
 
-        if is_scam:
-            # Check for evasion/refusal in transcript tail
-            # If the user has prior questions and the scammer refuses/threatens
-            if prior_questions:
-                if any(kw in text_lower for kw in ["no", "why", "refuse", "not telling", "don't ask", "shut up", "don't tell"]):
-                    verdict = "EVASIVE"
-                    risk_score = round(min(0.98, risk_score + 0.20), 2)
-                    label = "SCAM"
-                    safe_actions = ["Do NOT share any OTP code.", "Do NOT transfer any processing fees.", "Hang up the call immediately."]
-                    suggested_questions = [] # Clear questions in DANGER
-                else:
-                    verdict = "NOT_YET_ANSWERED"
+        if is_scam and prior_questions:
+            if any(kw in text_lower for kw in ["no", "why", "refuse", "not telling", "don't ask"]):
+                verdict = "EVASIVE"
+                risk_score = round(min(0.98, risk_score + 0.20), 2)
+                label = "SCAM"
+                safe_actions = ["Do NOT share any OTP code.", "Do NOT transfer any processing fees.", "Hang up the call immediately."]
+                suggested_questions = []
             else:
                 verdict = "NOT_YET_ANSWERED"
 

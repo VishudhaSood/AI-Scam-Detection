@@ -1,0 +1,119 @@
+TITLE: SBI Safety Advisory on Fake YONO Update Links and Reward Points APK Scams
+SOURCE: State Bank of India (SBI)
+CONTENT: State Bank of India (SBI) cautions all customers against fraudulent SMS messages claiming that their YONO account will be blocked unless they update their PAN card or click an unverified APK link. Fraudsters impersonate SBI customer support and send malicious links (.apk files or spoofed websites) promising SBI Reward Points redemption. SBI clarifies that it never sends APK files, SMS links for PAN updating, or asks customers to share internet banking credentials, PINs, or OTPs. Customers should only download YONO from official app stores and report suspicious SMS to report.phishing@sbi.co.in or call 1930.
+
+TITLE: HDFC Bank Security Warning on Electricity Bill Payment Fraud and Fake DISCOM Callers
+SOURCE: HDFC Bank
+CONTENT: HDFC Bank warns customers against fake SMS and calls claiming that electricity supply will be disconnected tonight due to unpaid bills. The caller impersonates an official from state electricity boards (like MSEDCL, TATA Power, BESCOM, or BSES) and asks the victim to call a cell phone number or install remote desktop applications like AnyDesk or TeamViewer to clear a small pending fee. Once connected, fraudsters drain funds from the victim's bank account. HDFC Bank reminds customers that utility companies never ask users to download remote access apps or pay bills via personal phone transfer calls.
+
+TITLE: ICICI Bank Advisory on SIM Swap and E-SIM Fraud Operations
+SOURCE: ICICI Bank
+CONTENT: ICICI Bank issues a high-priority warning regarding SIM Swap and E-SIM activation fraud. Attackers contact victims pretending to be telecom customer service agents (from Jio, Airtel, or Vi) offering 5G upgrades or improved network quality. They trick the victim into sharing an eSIM registration QR code or forwarding a specific SMS (e.g. SIM2SWAP) to telecom operator numbers. Once the swap completes, the victim loses mobile network signal and fraudsters receive all OTPs for banking transactions. ICICI Bank advises customers never to share eSIM QR codes or forward unverified telecom SMS codes.
+
+TITLE: Axis Bank Warning on Fake Credit Card Reward Point Redemption Scams
+SOURCE: Axis Bank
+CONTENT: Axis Bank cautions credit card holders against fraudulent calls claiming that their credit card reward points are expiring soon and can be converted into cash. The caller directs the victim to a fake Axis Bank payment gateway website and requests card details, expiration dates, CVV codes, and One-Time Passwords (OTPs) under the pretext of depositing reward cash into their account. Axis Bank confirms that reward points cannot be converted directly into cash via phone calls and that bank officials will never ask for CVV or OTP details to credit money.
+
+TITLE: Bank of Baroda Security Advisory on QR Code Scanner Scams and Receive-Money Frauds
+SOURCE: Bank of Baroda
+CONTENT: Bank of Baroda warns customers buying or selling products online (via platforms like OLX or Quikr) about QR code frauds. Scammers pretend to be buyers (often posing as army officers or government personnel) and send a QR code to the victim claiming it is to "transfer payment". They instruct the victim to scan the QR code and enter their UPI PIN to "receive money". Bank of Baroda emphasizes a fundamental rule of UPI banking: You NEVER need to scan a QR code or enter your UPI PIN to RECEIVE money. Entering your UPI PIN always DEDUCTS money from your bank account.
+
+TITLE: Punjab National Bank Caution on Fake Search Engine Customer Care Numbers
+SOURCE: Punjab National Bank (PNB)
+CONTENT: Punjab National Bank (PNB) cautions customers against searching for bank customer care numbers on public search engines or social media. Fraudsters manipulate online search listings and Google Maps locations to display their own phone numbers as PNB customer care or refund departments. When victims call seeking help for failed transactions, the scammers pretend to process refunds and request bank login details, debit card credentials, or remote device control. PNB advises customers to verify customer care numbers only through the bank's official website (pnbindia.in) or printed bank passbooks.
+
+TITLE: Kotak Mahindra Bank Alert on Telegram Part-Time Job and YouTube Like Scams
+SOURCE: Kotak Mahindra Bank
+CONTENT: Kotak Mahindra Bank alerts customers against social media part-time job scams operating via Telegram and WhatsApp. Victims receive messages promising daily earnings of 2000 to 5000 rupees for simple tasks like liking YouTube videos or rating Google Maps locations. After paying small initial payouts to build trust, scammers induce victims to join "VIP investment tasks" requiring upfront deposits of large sums. Kotak Bank advises customers never to transfer money to unverified personal accounts for job offers or investment schemes.
+
+TITLE: Canara Bank Caution on Unauthorized Digital Loan Apps and Instant Approvals
+SOURCE: Canara Bank
+CONTENT: Canara Bank cautions the public against fake instant loan mobile applications that offer paperless loans without credit checks. Fraudsters harvest personal contacts and photos from the victim's phone after installation, charge exorbitant processing fees, and send threat messages to family members using modified photos. Canara Bank urges customers to apply for loans exclusively through official bank branches or the official Canara ai1 mobile banking app.
+
+TITLE: Union Bank of India Advisory on Fake Courier Parcel and Police Arrest Threat Calls
+SOURCE: Union Bank of India
+CONTENT: Union Bank of India issues a caution against callers pretending to be FedEx, DHL, or customs officials claiming a parcel containing illegal drugs or passports has been sent in the customer's name. The victim is connected to a fake police officer via video call who threatens immediate arrest unless a "verification security deposit" is paid. Union Bank clarifies that law enforcement agencies never conduct video call arrests or request funds transfer for legal verification.
+
+TITLE: Bank of India Security Notice on Screen Sharing Apps AnyDesk and TeamViewer
+SOURCE: Bank of India (BOI)
+CONTENT: Bank of India (BOI) warns customers never to install screen-sharing software (such as AnyDesk, QuickSupport, TeamViewer, or UltraViewer) on their mobile phones or laptops at the request of any caller claiming to be a bank manager or technical support agent. Once installed, fraudsters can see your screen, view OTPs in real-time, and execute unauthorized transfers from your BOI account.
+
+TITLE: IndusInd Bank Security Guidance on Instant Account Unblocking Phishing
+SOURCE: IndusInd Bank
+CONTENT: IndusInd Bank cautions account holders against urgent SMS alerts claiming that their bank account or debit card has been suspended due to pending KYC verification. The SMS contains a link directing to a cloned IndusInd Bank login page designed to capture net banking passwords, debit card numbers, and OTPs. IndusInd Bank reiterates that it never freezes accounts via automated SMS links or requests sensitive credentials online.
+
+TITLE: YES Bank Advisory on Fake Work-From-Home Prepaid Task Scams
+SOURCE: YES Bank
+CONTENT: YES Bank issues a security alert regarding fake work-from-home employment scams where victims are recruited via Instagram, WhatsApp, or Telegram. Victims are assigned tasks like hotel rating or crypto trading and are asked to deposit money into merchant accounts to unlock earned commission. YES Bank advises customers to report such fraudulent recipient accounts to 1930 and freeze suspicious transfers immediately.
+
+TITLE: IDFC FIRST Bank Caution on Fraudulent UPI Payment Request Vishing
+SOURCE: IDFC FIRST Bank
+CONTENT: IDFC FIRST Bank cautions customers against bogus phone calls where the caller claims to have accidentally transferred money into the customer's account and requests an immediate refund via UPI collect request. Victims approving the collect request end up losing money from their own account. IDFC FIRST Bank reminds users to check their actual bank balance in their official mobile app before entertaining any refund claims.
+
+TITLE: Central Bank of India Alert on Lottery Prizes and KBC Lucky Draw Calls
+SOURCE: Central Bank of India
+CONTENT: Central Bank of India alerts customers against lottery fraud calls claiming winnings under KBC or government lucky draws. Scammers ask for advance processing fees or GST charges to release prize money. Central Bank of India clarifies that no genuine bank or government draw requires money transfers to receive winnings.
+
+TITLE: Indian Bank Security Advisory on WhatsApp Profile Impersonation of Bank Executives
+SOURCE: Indian Bank
+CONTENT: Indian Bank cautions customers and employees against scammers creating WhatsApp profiles using photos of bank executives or branch managers. The impersonators message customers requesting urgent financial assistance or gift cards. Indian Bank advises verifying caller identity through official branch phone lines before making any transfer.
+
+TITLE: Federal Bank Advisory on Unauthorized FASTag Recharge and Refund Phishing
+SOURCE: Federal Bank
+CONTENT: Federal Bank cautions vehicle owners against fake FASTag customer support websites and social media handles. Fraudsters trick users seeking FASTag balance refunds into clicking phishing links or sharing OTPs, resulting in unauthorized debit transactions from linked bank accounts.
+
+TITLE: Bandhan Bank Caution on Microfinance Loan Approval Advance Fee Fraud
+SOURCE: Bandhan Bank
+CONTENT: Bandhan Bank warns rural and urban customers against fake loan agents demanding upfront processing fees, insurance charges, or stamp duty payments for instant microfinance loan approval. Bandhan Bank clarifies that legitimate processing fees are never collected via personal UPI transfers or cash before loan sanction.
+
+TITLE: IDBI Bank Security Alert on Credit Card Limit Enhancement Phishing
+SOURCE: IDBI Bank
+CONTENT: IDBI Bank cautions credit cardholders against unsolicited calls offering free credit limit increases. Scammers send phishing web links where victims enter their credit card number, expiry date, CVV, and OTP, allowing fraudsters to execute high-value online purchases.
+
+TITLE: Bank of Maharashtra Advisory on Aadhaar Biometric Locking via mAadhaar
+SOURCE: Bank of Maharashtra
+CONTENT: Bank of Maharashtra advises customers to lock their Aadhaar biometrics using the official UIDAI portal or mAadhaar app to protect against unauthorized biometric withdrawals under the Aadhaar Enabled Payment System (AePS).
+
+TITLE: Punjab & Sind Bank Notice on Fake Pension Order and Life Certificate Scams
+SOURCE: Punjab & Sind Bank
+CONTENT: Punjab & Sind Bank warns senior citizens and pensioners against calls demanding banking details or OTPs to update digital life certificates (Jeevan Pramaan). The bank clarifies that life certificate verification does not require sharing debit card details or OTPs.
+
+TITLE: UCO Bank Caution on Unverified Investment Schemes and High Return Claims
+SOURCE: UCO Bank
+CONTENT: UCO Bank warns the public against fraudulent investment platforms promising guaranteed double returns within short periods. Fraudsters use fake bank endorsement letters to solicit deposits into unauthorized accounts.
+
+TITLE: Indian Overseas Bank (IOB) Security Warning on Debit Card Expiry SMS Phishing
+SOURCE: Indian Overseas Bank (IOB)
+CONTENT: Indian Overseas Bank (IOB) cautions customers against SMS notifications warning that their ATM card will expire in 24 hours unless verified. Clicking the attached link redirects to a fake banking portal that harvests card credentials and OTPs.
+
+TITLE: RBL Bank Advisory on WhatsApp Video Call Blackmail and Sextortion Scams
+SOURCE: RBL Bank
+CONTENT: RBL Bank issues a safety guidance on video call extortion scams. Fraudsters initiate unexpected WhatsApp video calls, record compromising clips using screen recording software, and demand immediate bank transfers under threat of public exposure. Victims are advised not to pay and report immediately to cybercrime.gov.in.
+
+TITLE: South Indian Bank Alert on Fake Job Consultancy Fee Fraud
+SOURCE: South Indian Bank
+CONTENT: South Indian Bank cautions job seekers against unauthorized recruitment agencies issuing fake offer letters on company letterheads and demanding registration fees. Genuine employers never demand payment for job offers.
+
+TITLE: Karur Vysya Bank Caution on Fake Merchant Soundbox & QR Code Scams
+SOURCE: Karur Vysya Bank
+CONTENT: Karur Vysya Bank advises retail merchants against fake payment confirmation apps. Fraudsters show fake payment success screens or play spoofed audio confirmations on mobile phones without actual money being credited to the shopkeeper's account.
+
+TITLE: City Union Bank Advisory on Mobile Banking Activation Code Sharing
+SOURCE: City Union Bank
+CONTENT: City Union Bank warns customers never to share activation SMS codes, MPINs, or device binding tokens with anyone over the phone. Sharing device registration codes allows scammers to bind their own phone to your CUB account.
+
+TITLE: Karnataka Bank Security Alert on Fraudulent Call Forwarding Code (*21*) Scams
+SOURCE: Karnataka Bank
+CONTENT: Karnataka Bank alerts customers against dialling unknown USSD codes (such as *21* or *401* followed by a phone number). Scammers trick victims into dialling these codes to activate call forwarding, allowing them to intercept incoming voice OTPs for bank logins.
+
+TITLE: Tamilnad Mercantile Bank Caution on Unverified Loan Settlement Transfers
+SOURCE: Tamilnad Mercantile Bank (TMB)
+CONTENT: TMB cautions borrowers against fake recovery agents offering discount loan settlements. All loan repayments and settlement amounts must be paid directly at TMB branch counters or official banking channels.
+
+TITLE: India Post Payments Bank (IPPB) Warning on Fake Doorstep Banking SMS Links
+SOURCE: India Post Payments Bank (IPPB)
+CONTENT: India Post Payments Bank (IPPB) cautions customers against fake SMS alerts claiming doorstep banking services require identity confirmation via unknown web links. IPPB staff never ask for OTPs or net banking passwords.
+
+TITLE: AU Small Finance Bank Advisory on Cyber Crime Police Impersonation Calls
+SOURCE: AU Small Finance Bank
+CONTENT: AU Small Finance Bank warns customers against threat calls claiming their bank account is linked to illegal hawala transactions or money laundering. The bank clarifies that genuine police investigations follow legal summons, not urgent phone calls demanding money transfers.

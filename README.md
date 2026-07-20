@@ -19,26 +19,31 @@ It combines **Real-time Web Speech Transcription**, **Groq Llama-3.3 LLM Reasoni
 - **Real-Time Monitoring**: Monitors calls via browser-native Web Speech API or local Whisper STT.
 - **Incremental Threat Evaluation**: Evaluates risk continuously in ~5-second streaming cycles.
 - **Adaptive Coaching Modes**: Transitions between **MONITOR** (Safe), **VERIFY** (Suggests exit questions), and **DANGER** (Shows immediate defensive actions).
+- **Interactive Reaction Feedback**: One-tap feedback buttons (*"🛑 Caller Refused / Evasive"* & *"🤬 Caller Became Hostile"*) allow instant manual risk escalation during live verification.
 
-### 🧠 2. LLM Reasoning & Negation Guardrails
+### 🧠 2. Multilingual LLM Reasoning & Hinglish Guardrails
 - **Powered by Groq API**: High-speed, low-latency evaluation using `llama-3.3-70b-versatile`.
+- **Hinglish Scam Scanner**: Detects mixed Hindi-English scam pressure phrases (*"paisa transfer karo"*, *"khata block ho jayega"*, *"police aayegi"*, *"giraftari warrant"*, *"penalty bharna padega"*).
 - **Negation & Context Awareness**: Intelligent context understanding prevents false alarms. Protective advice (e.g., *"do not share your OTP"* or *"never give your password"*) is correctly recognized as **SAFE**.
 
-### 📚 3. RAG Regulatory Knowledge Base
-- **Official RBI & CERT-In/MHA Corpus**: Indexes official regulatory advisories from the Reserve Bank of India and CERT-In.
-- **Digital Arrest Protection**: Specialized coverage for fake CBI, Narcotics, Customs, and Police video call arrest threats, referencing PM Modi's public caution and the National Cyber Crime Helpline **1930**.
+### 📄 3. One-Click Cybercrime Complaint Generator
+- **Helpline 1930 & Portal Integration**: When an audit returns a `SUSPICIOUS` or `SCAM` rating, a **"📥 Download Complaint Draft (1930)"** button generates a pre-formatted legal incident report ready for submission to [cybercrime.gov.in](https://cybercrime.gov.in) and Helpline **1930**.
+
+### 📚 4. RAG Regulatory & Banking Knowledge Base
+- **45 Official Advisories Indexed**: Comprehensive corpus covering RBI, CERT-In, MHA, SEBI, IRDAI, EPFO, FIU-IND, RERA, and **30+ major Indian Public, Private, Small Finance, & Payments Banks**.
+- **Comprehensive Financial Scam Coverage**: Specialized detection for Stock Market / Mutual Fund tip scams, Crypto exchange lockup frauds, Insurance bonus claims, Provident Fund withdrawal assistance fees, Matrimonial NRI romance extortion, Travel/Hotel booking phishing, Digital Arrest, YONO APK malware, DISCOM electricity bill scams, SIM Swap / eSIM fraud, UPI QR code receive-money tricks, and credit card reward point cash-in fraud.
 - **Zero-Crash Architecture**: Uses a pure-Python fallback vector store (`FallbackCollection`) to ensure 100% reliable performance on Windows without native C++ ONNX DLL crashes.
 
-### 📊 4. Multi-Factor Evidence Fusion Engine
+### 📊 5. Multi-Factor Evidence Fusion Engine
 Combines 4 independent signal dimensions with mathematical floor guarantees:
 - **Transcript LLM Analysis**: `45%`
 - **Scam Heuristics Scanner**: `25%`
 - **RAG Advisory Match**: `20%`
 - **Verification Question Verdict**: `10%`
 
-### 💾 5. Session Audit History
-- **SQLite Database Persistence**: All live and static audit reports are automatically saved in `db.sqlite3`.
-- **Persistent Storage**: Database files and vector indexes are preserved across server restarts via the smart launcher.
+### 📜 6. Session Audit History
+- **Saved Call History Modal**: One-click **"📜 Past Audits"** drawer fetches past saved call scans from `db.sqlite3` via `/api/v1/analyze/history`.
+- **Persistent Storage**: Database files and vector indexes are preserved across server restarts.
 
 ---
 
