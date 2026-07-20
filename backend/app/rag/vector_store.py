@@ -125,48 +125,46 @@ class VectorStoreManager:
     """
     _client = None
     _collection = None
-    _use_fallback = False
+    _use_fallback = True  # Default to pure-Python FallbackCollection to prevent Windows C++ DLL crashes
 
     @classmethod
     def get_client(cls):
-        if os.environ.get("USE_FALLBACK_DB") == "true":
+        if os.environ.get("USE_FALLBACK_DB") == "true" or cls._use_fallback:
             return None
         if cls._client is None:
-            import chromadb
-            cls._client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+            try:
+                import chromadb
+                cls._client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+            except BaseException:
+                cls._use_fallback = True
+                return None
         return cls._client
 
     @classmethod
     def get_collection(cls):
-        # 1. Force fallback if requested by environment
+        # 1. Force fallback if requested by environment or if fallback active
         if os.environ.get("USE_FALLBACK_DB") == "true" or cls._use_fallback:
             if cls._collection is None or not isinstance(cls._collection, FallbackCollection):
-                print("USE_FALLBACK_DB is active. Initializing pure-Python FallbackCollection.")
+                print("Initializing pure-Python FallbackCollection (zero-dependency vector store).")
                 cls._collection = FallbackCollection()
             return cls._collection
 
         if cls._collection is None:
             try:
                 import chromadb
-                from chromadb.utils import embedding_functions
-                
                 client = cls.get_client()
+                if client is None:
+                    cls._use_fallback = True
+                    return cls.get_collection()
                 
-                try:
-                    embedding_fn = embedding_functions.ONNXMiniLM_L6_V2()
-                    # Test ONNX runtime loading
-                    embedding_fn(["test"])
-                except Exception:
-                    # Fallback to python hashing embedding
-                    embedding_fn = HashEmbeddingFunction()
-                
+                embedding_fn = HashEmbeddingFunction()
                 cls._collection = client.get_or_create_collection(
                     name="scam_advisories",
                     embedding_function=embedding_fn,
                     metadata={"hnsw:space": "cosine"}
                 )
-            except Exception as e:
-                print(f"ChromaDB failed to load ({e}). Swapping to pure-Python FallbackCollection.")
+            except BaseException as e:
+                print(f"ChromaDB native client failed ({e}). Swapping to pure-Python FallbackCollection.")
                 cls._use_fallback = True
                 cls._collection = FallbackCollection()
                 

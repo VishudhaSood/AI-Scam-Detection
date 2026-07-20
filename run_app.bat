@@ -8,11 +8,18 @@ echo.
 :: 1. Force the zero-dependency pure-Python fallback database to prevent onnxruntime DLL crashes
 set USE_FALLBACK_DB=true
 
-:: Force mock Whisper to prevent download/loading hangs on systems without cached model or slow network
+:: Default to real Whisper transcription unless set otherwise
 set USE_MOCK_WHISPER=false
 
+:: Detect virtualenv Python vs System Python
+set PYTHON_EXE=python
+if exist backend\venv\Scripts\python.exe (
+    echo [INFO] Detected virtualenv at backend\venv
+    set PYTHON_EXE=backend\venv\Scripts\python.exe
+)
+
 :: 2. Check if Python is installed
-python --version >nul 2>&1
+%PYTHON_EXE% --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Python is not installed or not added to your PATH environment variable.
     echo Please install Python 3.10+ and select Add python.exe to PATH during installation.
@@ -29,22 +36,27 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-:: 4. Clean old DB folder and seed documents
-echo [1/4] Preparing vector database...
-if exist backend\chroma_db rmdir /s /q backend\chroma_db
-if exist backend\db.sqlite3 del /f /q backend\db.sqlite3
-
-echo [2/4] Seeding official regulatory advisories...
-python backend/app/rag/index_docs.py
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to seed advisories database. Check your Python environment dependencies.
-    pause
-    exit /b
+:: 4. Seed advisory DB only if it doesn't exist yet (preserves call logs in db.sqlite3)
+echo [1/4] Checking vector database...
+if not exist backend\chroma_db (
+    echo    ChromaDB not found — seeding official regulatory advisories...
+    %PYTHON_EXE% backend/app/rag/index_docs.py
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to seed advisories database. Check your Python environment dependencies.
+        pause
+        exit /b
+    )
+) else (
+    echo    ChromaDB already exists, skipping re-seed. Delete backend\chroma_db to force refresh.
 )
 
 :: 5. Launch Backend
 echo [3/4] Starting FastAPI backend server in a separate window...
-start cmd /k "title AI Scam Backend Server && cd backend && echo Starting backend... && python run.py"
+if exist backend\venv\Scripts\python.exe (
+    start cmd /k "title AI Scam Backend Server && cd backend && echo Starting backend... && venv\Scripts\python.exe run.py"
+) else (
+    start cmd /k "title AI Scam Backend Server && cd backend && echo Starting backend... && python run.py"
+)
 
 :: 6. Launch Frontend
 echo [4/4] Starting React Vite frontend server in a separate window...

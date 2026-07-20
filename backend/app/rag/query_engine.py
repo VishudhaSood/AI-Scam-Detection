@@ -6,16 +6,52 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 from app.rag.vector_store import VectorStoreManager
-from app.models.schemas import Advisory, AnalysisResponse
+from app.models.schemas import Advisory
 
 # Load environment variables
 load_dotenv()
 
 logger = logging.getLogger("app.rag")
 
+
+def _get_llm_client():
+    """
+    Returns (client, model_name) using the first available LLM provider.
+    Priority: GROQ_API_KEY > OPENROUTER_API_KEY > None (fallback).
+    """
+    # --- Option 1: Groq (recommended, free, fast) ---
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if groq_key and "your_groq" not in groq_key.lower():
+        model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        client = OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=groq_key,
+        )
+        logger.info(f"LLM provider: Groq ({model})")
+        return client, model
+
+    # --- Option 2: OpenRouter ---
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key and "your_openrouter" not in openrouter_key.lower():
+        model = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=openrouter_key,
+            default_headers={
+                "HTTP-Referer": "https://github.com/VishudhaSood/AI-Scam-Detection",
+                "X-Title": "AI Scam Guard Platform"
+            }
+        )
+        logger.info(f"LLM provider: OpenRouter ({model})")
+        return client, model
+
+    # --- No key configured ---
+    return None, None
+
+
 class RAGQueryEngine:
     """
-    Query Engine coordinating RAG search in ChromaDB and Qwen-LLM analysis via OpenRouter.
+    Query Engine coordinating RAG search in ChromaDB and LLM analysis via Groq/OpenRouter.
     Optimized to run in a single LLM API query request.
     """
 
@@ -61,7 +97,7 @@ class RAGQueryEngine:
     @classmethod
     def evaluate_transcript(cls, transcript: str) -> Dict[str, Any]:
         """
-        Retrieves matching context warnings and prompts Qwen to evaluate.
+        Retrieves matching context warnings and prompts the LLM to evaluate.
         """
         # 1. Retrieve RAG advisories
         advisories = cls.query_advisories(transcript, n_results=2)
@@ -71,27 +107,28 @@ class RAGQueryEngine:
         for i, adv in enumerate(advisories):
             context_str += f"\nAdvisory {i+1} [{adv.source}]: {adv.title}\nDescription: {adv.description}\n"
 
-        # 2. Check for OpenRouter configuration
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        model_name = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+        # 2. Get LLM client (Groq or OpenRouter)
+        client, model_name = _get_llm_client()
 
-        if not api_key or "your_openrouter" in api_key.lower():
-            logger.warning("OPENROUTER_API_KEY is not configured in .env. Running local fallback.")
+        if client is None:
+            logger.warning("No LLM API key configured in .env. Running local keyword fallback.")
             return cls._get_fallback_mock(transcript, advisories)
 
-        # 3. Initialize OpenRouter client
-        client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
-            default_headers={
-                "HTTP-Referer": "https://github.com/VishudhaSood/AI-Scam-Detection",
-                "X-Title": "AI Scam Guard Platform"
-            }
-        )
-
         system_prompt = (
-            "You are an AI Scam Auditor. Your task is to analyze the phone call transcript for fraud, phishing, or financial scam markers.\n"
+            "You are an AI Scam Auditor specializing in Indian phone scams. Your task is to analyze the phone call transcript for fraud, phishing, or financial scam markers.\n"
             "Evaluate whether the conversation details match any warning patterns in the provided official regulatory advisories.\n\n"
+            "### CRITICAL: NEGATION & CONTEXT AWARENESS\n"
+            "Pay careful attention to WHO is speaking and WHAT they are saying:\n"
+            "- 'do not share your OTP' is a SAFETY WARNING, not a scam.\n"
+            "- 'never give your password' is protective advice, not a threat.\n"
+            "- 'my bank called me back, everything is fine' is a benign statement.\n"
+            "- Only flag as SCAM when the CALLER is DEMANDING credentials, money, or threatening the listener.\n\n"
+            "### SCAM CATEGORIES TO DETECT:\n"
+            "- Digital Arrest / Law Enforcement Impersonation: Scammer poses as CBI, Police, Customs, or Narcotics officer. Threatens arrest via video call. Demands 'settlement fee'.\n"
+            "- Bank Impersonation (KYC/OTP): Scammer poses as bank manager. Claims account is blocked. Demands OTP, PIN, or CVV.\n"
+            "- Lottery & Prize Scam: Claims victim won lottery/KBC prize. Demands processing fee.\n"
+            "- Tech Support Scam: Claims computer is infected. Demands AnyDesk/TeamViewer access.\n"
+            "- Loan App Fraud: Unauthorized lending apps with hidden fees and aggressive recovery.\n\n"
             "### REGULATORY ADVISORIES CONTEXT:\n"
             f"{context_str or 'No relevant advisories found.'}\n\n"
             "### OUTPUT FORMAT INSTRUCTIONS:\n"
@@ -100,7 +137,7 @@ class RAGQueryEngine:
             "{\n"
             '  "risk_score": <float between 0.0 and 1.0 representing threat level>,\n'
             '  "label": <string, either "SAFE", "SUSPICIOUS", or "SCAM">,\n'
-            '  "scam_category": <string, e.g., "Lottery & Prize Scam", "Bank Impersonation (KYC)", "Law Enforcement Impersonation", or "None">,\n'
+            '  "scam_category": <string, e.g., "Digital Arrest", "Bank Impersonation (KYC)", "Lottery & Prize Scam", or "None">,\n'
             '  "explanation": <string explaining your evaluation and highlighting exact red flags in the transcript>\n'
             "}"
         )
@@ -123,7 +160,7 @@ class RAGQueryEngine:
             return result
 
         except Exception as e:
-            logger.error(f"Error during OpenRouter evaluation: {e}")
+            logger.error(f"Error during LLM evaluation: {e}")
             return cls._get_fallback_mock(transcript, advisories)
 
     @classmethod
@@ -142,11 +179,11 @@ class RAGQueryEngine:
             label = "SCAM"
             category = "Bank Impersonation (KYC/OTP)"
             explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Urgent demands for banking credentials or KYC updates detected."
-        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband"]):
+        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband", "digital arrest", "cyber police"]):
             risk_score = 0.93
             label = "SCAM"
-            category = "Impersonation of Law Enforcement"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest related to illegal packages or police warrants."
+            category = "Digital Arrest / Law Enforcement Impersonation"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest warrant or customs violation intercepts detected."
         else:
             risk_score = 0.10
             label = "SAFE"
@@ -164,7 +201,7 @@ class RAGQueryEngine:
     @classmethod
     def evaluate_incremental(cls, transcript: str, prior_questions: List[str] = None) -> Dict[str, Any]:
         """
-        Retrieves advisories and prompts Qwen to perform an incremental audit on the live transcript.
+        Retrieves advisories and prompts the LLM to perform an incremental audit on the live transcript.
         Evaluates risk score, categories, safe actions, suggested questions, and evasion verdict.
         """
         # 1. Retrieve advisories
@@ -173,22 +210,32 @@ class RAGQueryEngine:
         for i, adv in enumerate(advisories):
             context_str += f"\nAdvisory {i+1} [{adv.source}]: {adv.title}\nDescription: {adv.description}\n"
 
-        # 2. Check OpenRouter configuration
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        model_name = os.environ.get("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+        # 2. Get LLM client
+        client, model_name = _get_llm_client()
 
-        if not api_key or "your_openrouter" in api_key.lower():
+        if client is None:
             return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
 
-        # 3. Setup OpenRouter API prompt
+        # 3. Setup API prompt
         prior_str = json.dumps(prior_questions or [])
         system_prompt = (
-            "You are an AI Scam Auditor. Analyze this live, incomplete, mixed two-speaker transcript.\n"
+            "You are an AI Scam Auditor specializing in Indian phone scams. Analyze this live, incomplete, mixed two-speaker transcript.\n"
             "Evaluate whether it matches any warning patterns in the regulatory advisories.\n\n"
+            "### CRITICAL: NEGATION & CONTEXT AWARENESS\n"
+            "Pay careful attention to WHO is speaking and WHAT they are saying:\n"
+            "- 'do not share your OTP' or 'never give OTP' is a SAFETY WARNING from the listener, NOT a scam.\n"
+            "- 'my bank confirmed everything is fine' is benign.\n"
+            "- Only classify as SUSPICIOUS/SCAM when the CALLER is actively demanding credentials, money, or threatening.\n"
+            "- Benign small talk ('hello', 'how are you', 'goodbye') is SAFE with risk 0.05.\n\n"
             "### TRANSCRIPT NOISE GUIDELINE:\n"
             "The transcript is generated in real-time by a local speech-to-text model on a speakerphone conversation.\n"
             "It will contain transcription noise, typos, missing punctuation, and grammatical mistakes.\n"
             "Evaluate the high-level social engineering, coercion, or fraud patterns, NOT the verbatim wording.\n\n"
+            "### SCAM CATEGORIES TO DETECT:\n"
+            "- Digital Arrest / Law Enforcement Impersonation: CBI, Police, Customs, Narcotics officer impersonation. Video call 'arrest'. Settlement fee demands.\n"
+            "- Bank Impersonation (KYC/OTP): Fake bank manager. Account blocked threats. OTP/PIN/CVV demands.\n"
+            "- Lottery & Prize Scam: KBC/lottery wins. Processing fee demands.\n"
+            "- Tech Support Scam: Fake Microsoft/antivirus. AnyDesk/TeamViewer demands.\n\n"
             "### REGULATORY ADVISORIES CONTEXT:\n"
             f"{context_str or 'No relevant advisories found.'}\n\n"
             "### RECENTLY SUGGESTED VERIFICATION QUESTIONS:\n"
@@ -222,15 +269,6 @@ class RAGQueryEngine:
             "}"
         )
 
-        client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
-            default_headers={
-                "HTTP-Referer": "https://github.com/VishudhaSood/AI-Scam-Detection",
-                "X-Title": "AI Scam Guard Platform"
-            }
-        )
-
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -247,7 +285,7 @@ class RAGQueryEngine:
             result["advisories"] = advisories
             return result
         except Exception as e:
-            logger.error(f"Error in evaluate_incremental OpenRouter: {e}")
+            logger.error(f"Error in evaluate_incremental LLM: {e}")
             return cls._get_fallback_mock_incremental(transcript, prior_questions or [], advisories)
 
     @classmethod
@@ -289,11 +327,11 @@ class RAGQueryEngine:
                 "Tell them you will hang up and call the official customer care number on your card."
             ]
             is_scam = True
-        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband", "warrant"]):
+        elif any(kw in text_lower for kw in ["police", "cbi", "arrest", "contraband", "warrant", "digital arrest", "cyber police"]):
             risk_score = 0.72
             label = "SUSPICIOUS"
-            category = "Law Enforcement Impersonation"
-            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest warrant or custom violation intercepts."
+            category = "Digital Arrest / Law Enforcement Impersonation"
+            explanation = "[FALLBACK MOCK ANALYSIS - NO LIVE LLM] Threats of arrest warrant or customs violation intercepts."
             red_flags = ["Arrest warrant threats", "Coercion into secrecy"]
             suggested_questions = [
                 "Ask which official police station is issuing this warrant and their ID.",

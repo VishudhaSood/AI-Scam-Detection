@@ -11,7 +11,7 @@ def save_analysis_result(db: Session, response_data: AnalysisResponse) -> CallLo
         risk_score=response_data.risk_score,
         label=response_data.label,
         scam_category=response_data.scam_category,
-        deepfake_probability=response_data.deepfake_probability,
+        deepfake_probability=getattr(response_data, "deepfake_probability", None),
         explanation=response_data.explanation,
         analyzed_at=response_data.analyzed_at
     )

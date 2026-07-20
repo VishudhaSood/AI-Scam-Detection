@@ -435,7 +435,7 @@ const Dashboard = () => {
           <div className="glass-panel loading-box">
             <div className="spinner"></div>
             <p style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>
-              Consulting RAG knowledge bases and analyzing voice biometrics...
+              Consulting RAG knowledge bases and evaluating scam threat patterns...
             </p>
           </div>
         )}

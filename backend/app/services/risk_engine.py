@@ -11,17 +11,16 @@ class EvidenceFusionEngine:
     
     Guarantees:
     - No single source alone determines the final classification.
-    - Deepfake probability increases suspicion but never triggers DANGER (scam state) alone.
-    - Low deepfake score never pulls down transcript-based risk.
+    - Transcript floor: the fused score is always at least as high as the transcript risk.
     """
     
     # Configurable weights for each evidence component
     # Sum of all weights = 1.0
+    # Note: Deepfake/AASIST removed — its parallel mic capture degraded WebSpeech.
     WEIGHTS = {
-        "transcript": 0.40,      # Qwen LLM analysis
-        "deepfake": 0.20,        # AASIST voice anti-spoofing
-        "heuristics": 0.20,      # Tiered keyword scanner
-        "rag_match": 0.10,       # ChromaDB advisory match count
+        "transcript": 0.45,      # LLM analysis (Groq llama-3.3)
+        "heuristics": 0.25,      # Tiered keyword scanner
+        "rag_match": 0.20,       # ChromaDB advisory match strength
         "verification": 0.10      # Caller response to verification questions
     }
 
@@ -40,11 +39,6 @@ class EvidenceFusionEngine:
         heuristic_risk = ev_dict["heuristics"].score if "heuristics" in ev_dict else 0.0
         rag_score = ev_dict["rag_match"].score if "rag_match" in ev_dict else 0.0
         verification_score = ev_dict["verification"].score if "verification" in ev_dict else 0.0
-        
-        deepfake_ev = ev_dict.get("deepfake")
-        deepfake_prob = None
-        if deepfake_ev is not None and deepfake_ev.details.get("probability") is not None:
-            deepfake_prob = deepfake_ev.score
 
         advisories_count = int(rag_score * 2.0)
         
@@ -55,7 +49,6 @@ class EvidenceFusionEngine:
             
         return cls.fuse_evidence(
             transcript_risk=transcript_risk,
-            deepfake_prob=deepfake_prob,
             heuristic_risk=heuristic_risk,
             advisories_count=advisories_count,
             verification_verdict=verification_verdict
@@ -65,17 +58,15 @@ class EvidenceFusionEngine:
     def fuse_evidence(
         cls,
         transcript_risk: float,
-        deepfake_prob: Optional[float],
         heuristic_risk: float,
         advisories_count: int,
         verification_verdict: str
     ) -> Tuple[float, Dict[str, float]]:
         """
-        Merges 5 evidence dimensions into a raw fused score.
+        Merges 4 evidence dimensions into a raw fused score.
         
         Args:
             transcript_risk: Score from LLM (0.0 to 1.0)
-            deepfake_prob: Probability of synthetic voice (0.0 to 1.0, or None if failed)
             heuristic_risk: Score from keyword tiers (0.0 to 1.0)
             advisories_count: Number of semantically matched advisories
             verification_verdict: EVASIVE, REFUSED, THREATENED, PLAUSIBLE, etc.
@@ -93,36 +84,22 @@ class EvidenceFusionEngine:
         else:
             verification_score = 0.0
 
-        # 3. Handle missing components (e.g. if AASIST failed and returned None)
-        active_weights = dict(cls.WEIGHTS)
-        if deepfake_prob is None:
-            active_weights["deepfake"] = 0.0
-
-        total_weight = sum(active_weights.values())
-        if total_weight == 0:
-            total_weight = 1.0
+        # 3. All weights are always active (no optional components)
+        total_weight = sum(cls.WEIGHTS.values())
 
         # 4. Compute weighted sum
         weighted_sum = (
-            transcript_risk * active_weights["transcript"] +
-            (deepfake_prob or 0.0) * active_weights["deepfake"] +
-            heuristic_risk * active_weights["heuristics"] +
-            rag_score * active_weights["rag_match"] +
-            verification_score * active_weights["verification"]
+            transcript_risk * cls.WEIGHTS["transcript"] +
+            heuristic_risk * cls.WEIGHTS["heuristics"] +
+            rag_score * cls.WEIGHTS["rag_match"] +
+            verification_score * cls.WEIGHTS["verification"]
         )
         fused = weighted_sum / total_weight
 
-        # 5. Constraint A: A low deepfake score must NEVER pull down or reduce transcript-based risk
-        if deepfake_prob is not None:
-            fused = max(fused, transcript_risk)
-
-        # 6. Constraint B: Deepfake probability alone cannot classify a call as a scam.
-        # If the overall score crosses the DANGER threshold (>= 0.75), but both
-        # transcript content risk and keyword heuristics are low (< 0.40),
-        # cap the risk at 0.74 (keeping it in VERIFY mode).
-        if fused >= 0.75:
-            if transcript_risk < 0.40 and heuristic_risk < 0.40:
-                fused = 0.74
+        # 5. Transcript floor: the fused score is always at least as high as the
+        #    transcript risk. This prevents weak heuristic/RAG scores from diluting
+        #    a strong LLM signal (fixes FLAWS §2.4).
+        fused = max(fused, transcript_risk)
 
         # Round to 2 decimal places
         fused_score = round(max(0.0, min(1.0, fused)), 2)
@@ -130,7 +107,6 @@ class EvidenceFusionEngine:
         # Build intermediate breakdown dictionary
         breakdown = {
             "transcript": round(transcript_risk, 2),
-            "deepfake": round(deepfake_prob, 2) if deepfake_prob is not None else 0.0,
             "heuristics": round(heuristic_risk, 2),
             "rag_match": round(rag_score, 2),
             "verification": round(verification_score, 2)

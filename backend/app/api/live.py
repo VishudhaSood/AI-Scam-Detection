@@ -24,14 +24,7 @@ except ImportError as import_error:
     class LiveSession:
         """
         STUB — stands in for Dev 2's LiveSession so the WebSocket plumbing
-        and the React client can be built and tested end-to-end. Produces
-        clearly-fake canned transcript text and a slowly rising risk score.
-
-        Mirrors the real interface (verified against Dev 2's branch):
-            LiveSession(session_id: str, caller_number: str | None = None)
-            await process_cycle(chunk: bytes) -> dict | LiveUpdate
-        finalize() is scheduled for Milestone 9; the endpoint tolerates
-        its absence and builds a fallback LiveFinal from the last update.
+        and the React client can be built and tested end-to-end.
         """
 
         def __init__(self, session_id: str, caller_number: str | None = None):
@@ -43,8 +36,6 @@ except ImportError as import_error:
 
         async def process_cycle(self, chunk: bytes) -> LiveUpdate:
             self.chunk_count += 1
-            # Commit the previous partial every 3 chunks to exercise the
-            # committed-vs-partial rendering split in the UI.
             partial = f"[stub] chunk {self.chunk_count} received ({len(chunk)} bytes). "
             if self.chunk_count % 3 == 0:
                 self.committed += partial
@@ -84,26 +75,10 @@ async def live_monitor(websocket: WebSocket):
                 chunk = frame["bytes"]
                 # A malformed audio frame must be dropped, never end the session
                 try:
-                    # Detect 0xDF-tagged audio-only frames (from webspeech hybrid mode).
-                    # These are WebM chunks sent purely for AASIST deepfake analysis —
-                    # Whisper is NOT run on them since Web Speech already handles the transcript.
-                    # The tag alone is not enough: a raw float32 PCM frame from Whisper mode
-                    # has a 1/256 chance of starting with 0xDF, so also require the WebM EBML
-                    # header that every standalone recorder blob begins with.
-                    if len(chunk) > 5 and chunk[0] == 0xDF and chunk[1:5] == b"\x1a\x45\xdf\xa3":
-                        audio_bytes = chunk[1:]  # strip the magic byte
-                        if hasattr(session, "process_audio_only"):
-                            await session.process_audio_only(audio_bytes)
-                            # Re-run the risk evaluation cycle with the current transcript text to update
-                            # all fused risk scores and deepfake statistics.
-                            raw = await session.process_text_cycle(session.committed_text, session.partial_text)
-                            last_update = LiveUpdate.model_validate(raw)
-                            await websocket.send_text(last_update.model_dump_json())
-                    else:
-                        # Normal Whisper mode: full cycle (STT + AASIST + risk fusion)
-                        raw = await session.process_cycle(chunk)
-                        last_update = LiveUpdate.model_validate(raw)
-                        await websocket.send_text(last_update.model_dump_json())
+                    # Normal Whisper mode: full cycle (STT + risk fusion)
+                    raw = await session.process_cycle(chunk)
+                    last_update = LiveUpdate.model_validate(raw)
+                    await websocket.send_text(last_update.model_dump_json())
                 except Exception as e:
                     logger.error(f"Dropped malformed binary frame ({len(chunk)} bytes): {e}")
             elif frame.get("text") is not None:
@@ -156,8 +131,7 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
     """
     Instantly assembles the final report from the last cached LiveUpdate.
     This is intentionally synchronous and non-blocking — no heavy inference
-    is re-run at teardown time. The live session already computed everything
-    incrementally during the active session.
+    is re-run at teardown time.
     """
     transcript = ""
     if last_update is not None:
@@ -168,20 +142,11 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
     scam_cat    = last_update.scam_category  if last_update else "None"
     advisories  = last_update.advisories     if last_update else []
 
-    # Pull deepfake probability from the last update if it was populated
-    df_prob = None
-    df_label = None
-    df_conf = None
-    df_model = None
     evidence_breakdown = None
     overall_confidence = 0.0
     reasoning_trace = []
     
     if last_update is not None:
-        df_prob  = getattr(last_update, "deepfake_probability", None)
-        df_label = getattr(last_update, "deepfake_label", None)
-        df_conf  = getattr(last_update, "deepfake_confidence", None)
-        df_model = getattr(last_update, "deepfake_model", None)
         evidence_breakdown = getattr(last_update, "evidence_breakdown", None)
         overall_confidence = getattr(last_update, "overall_confidence", 0.0)
         reasoning_trace = getattr(last_update, "reasoning_trace", [])
@@ -192,10 +157,6 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
         risk_score=risk_score,
         label=label,
         scam_category=scam_cat,
-        deepfake_probability=df_prob,
-        deepfake_label=df_label,
-        deepfake_confidence=df_conf,
-        deepfake_model=df_model,
         evidence_breakdown=evidence_breakdown,
         overall_confidence=overall_confidence,
         reasoning_trace=reasoning_trace,

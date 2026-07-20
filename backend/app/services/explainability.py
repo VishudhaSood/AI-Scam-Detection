@@ -19,7 +19,7 @@ class ExplainabilityEngine:
         # 1. Add individual provider evaluation reports
         for ev in evidence_list:
             # Only include providers that contributed or had active evaluations
-            if ev.score > 0.0 or ev.confidence > 0.0 or ev.source == "deepfake":
+            if ev.score > 0.0 or ev.confidence > 0.0:
                 # Clean source name
                 source_label = ev.source.replace("_", " ").title()
                 score_pct = f"{round(ev.score * 100)}%" if ev.score is not None else "N/A"
@@ -31,7 +31,7 @@ class ExplainabilityEngine:
         # 2. Add fusion step trace
         trace.append(
             f"[Evidence Fusion] Combined multi-factor threat level evaluated at {round(raw_risk * 100)}%. "
-            f"Weights: Transcript AI (40%), Voice Deepfake (20%), Keyword Heuristics (20%), RAG Advisories (10%), Verification Question Verdict (10%)."
+            f"Weights: Transcript AI (45%), Keyword Heuristics (25%), RAG Advisories (20%), Verification Question Verdict (10%)."
         )
         
         # 3. Add state machine and temporal risk trace

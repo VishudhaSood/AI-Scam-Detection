@@ -9,7 +9,6 @@ const AnalysisDetails = ({ data }) => {
     risk_score,
     label,
     scam_category,
-    deepfake_probability,
     explanation,
     advisories,
     evidence_breakdown,
@@ -23,7 +22,6 @@ const AnalysisDetails = ({ data }) => {
     return 'risk-badge scam';
   };
 
-  const isDeepfakeHigh = deepfake_probability > 0.5;
 
   return (
     <div className="results-container">
@@ -40,10 +38,10 @@ const AnalysisDetails = ({ data }) => {
               <p>Category</p>
               <span>{scam_category}</span>
             </div>
-            <div className="metric-tile deepfake-probability">
-              <p>Voice Clone Prob</p>
-              <span className={isDeepfakeHigh ? 'high' : 'low'}>
-                {deepfake_probability !== null ? `${Math.round(deepfake_probability * 100)}%` : 'N/A'}
+            <div className="metric-tile">
+              <p>Confidence</p>
+              <span style={{ color: 'var(--accent-purple, #8b5cf6)' }}>
+                {Math.round((overall_confidence || 0) * 100)}%
               </span>
             </div>
           </div>
@@ -61,12 +59,6 @@ const AnalysisDetails = ({ data }) => {
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Transcript Analysis</div>
               <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
                 {Math.round(evidence_breakdown.transcript * 100)}%
-              </div>
-            </div>
-            <div className="evidence-item">
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>AI Voice Probability</div>
-              <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
-                {evidence_breakdown.deepfake !== null ? `${Math.round(evidence_breakdown.deepfake * 100)}%` : 'N/A'}
               </div>
             </div>
             <div className="evidence-item">

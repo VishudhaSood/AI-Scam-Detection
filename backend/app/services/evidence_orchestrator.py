@@ -3,7 +3,6 @@ from typing import Dict, Any, List
 from app.services.evidence_provider import Evidence, EvidenceProvider
 from app.services.providers import (
     WhisperReasoningProvider,
-    AASISTDeepfakeProvider,
     HeuristicScorerProvider,
     RAGAdvisoryProvider,
     VerificationProvider
@@ -12,15 +11,18 @@ from app.services.risk_engine import EvidenceFusionEngine
 
 class EvidenceOrchestrator:
     """
-    Central orchestration engine that aggregates signals from Whisper, AASIST,
+    Central orchestration engine that aggregates signals from Whisper LLM,
     heuristics, RAG databases, and caller verification responses, then routes them
     through the evidence fusion and state machine layers.
+    
+    Note: AASIST deepfake provider has been removed. The parallel mic capture
+    it required degraded WebSpeech API accuracy, and the ONNX model file was
+    never distributed with the repo. Weights are rebalanced accordingly.
     """
     
     def __init__(self):
         self.providers: List[EvidenceProvider] = [
             WhisperReasoningProvider(),
-            AASISTDeepfakeProvider(),
             HeuristicScorerProvider(),
             RAGAdvisoryProvider(),
             VerificationProvider()

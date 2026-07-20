@@ -25,14 +25,16 @@ class WhisperReasoningProvider(EvidenceProvider):
         now = time.time()
         time_elapsed = now - session.last_llm_audit_time
 
-        # LLM Throttle Policy:
-        # 1. Immediately on high-tier heuristic trigger_llm.
+        # LLM Throttle Policy (with 10s minimum cooldown to prevent quota death):
+        # 1. On high-tier heuristic trigger_llm, BUT only if 10s have passed since last audit.
         # 2. When questions were pending and new speech arrived since the last audit (check for answers).
         # 3. Every 20 seconds of elapsed time, if new speech has arrived.
+        # The 10s floor prevents a 3-min call from burning 30+ API calls.
+        MIN_AUDIT_INTERVAL = 10.0
         should_audit = False
-        if trigger_llm:
+        if trigger_llm and new_speech and time_elapsed >= MIN_AUDIT_INTERVAL:
             should_audit = True
-        elif session.pending_questions and new_speech:
+        elif session.pending_questions and new_speech and time_elapsed >= MIN_AUDIT_INTERVAL:
             should_audit = True
         elif time_elapsed >= 20.0 and new_speech:
             should_audit = True

@@ -15,24 +15,17 @@ const LiveCallMonitor = ({ header }) => {
   const [error, setError] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [transcriptionMode, setTranscriptionMode] = useState('webspeech'); // 'webspeech' | 'whisper'
-  // Background voice-clone capture runs a second mic consumer next to
-  // SpeechRecognition, which can degrade recognition on some devices —
-  // expose a toggle so the two can be compared live
-  const [voiceCloneScan, setVoiceCloneScan] = useState(true);
 
   // Mutable machinery lives in refs: changing these must not re-render the UI
   const wsRef = useRef(null);
   const recognitionRef = useRef(null);
-  const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const audioContextRef = useRef(null);
   const processorRef = useRef(null);
   const statusRef = useRef(status);
-  const dfIntervalRef = useRef(null);
   const pcmFlushIntervalRef = useRef(null);
 
-  // Smoothed deepfake signal — EMA with alpha=0.25 to dampen jitter between WebSocket cycles
-  const smoothedDeepfakeRef = useRef(null);
+  // Smoothed evidence breakdown — EMA with alpha=0.25 to dampen jitter between WebSocket cycles
   const smoothedBreakdownRef = useRef(null);
   const EMA_ALPHA = 0.25; // lower = smoother, higher = more responsive
 
@@ -62,17 +55,9 @@ const LiveCallMonitor = ({ header }) => {
       }
       audioContextRef.current = null;
     }
-    if (dfIntervalRef.current) {
-      clearInterval(dfIntervalRef.current);
-      dfIntervalRef.current = null;
-    }
     if (pcmFlushIntervalRef.current) {
       clearInterval(pcmFlushIntervalRef.current);
       pcmFlushIntervalRef.current = null;
-    }
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop();
-      recorderRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -166,7 +151,6 @@ const LiveCallMonitor = ({ header }) => {
     setUpdate(null);
     setFinalResult(null);
     setElapsedSeconds(0);
-    smoothedDeepfakeRef.current = null;
     smoothedBreakdownRef.current = null;
 
     // Clear the accumulated transcripts for a fresh session
@@ -254,49 +238,6 @@ const LiveCallMonitor = ({ header }) => {
         };
 
         recognition.start();
-
-        // --- Background audio capture for AASIST deepfake detection ---
-        // Web Speech API gives us text but no audio. We solve this by running
-        // a silent MediaRecorder in parallel on the same mic stream, collecting
-        // 8-second audio chunks, and sending them to the backend for AASIST
-        // acoustic analysis only (backend skips Whisper on these frames).
-        const DEEPFAKE_MAGIC = 0xDF; // single-byte tag prepended to mark audio-only frames
-        if (voiceCloneScan) {
-          try {
-            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            streamRef.current = audioStream;
-
-            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-              ? 'audio/webm;codecs=opus'
-              : 'audio/webm';
-
-            const dfRecorder = new MediaRecorder(audioStream, { mimeType });
-            recorderRef.current = dfRecorder;
-
-            dfRecorder.ondataavailable = async (e) => {
-              if (!e.data || e.data.size < 1000) return;
-              if (ws.readyState !== WebSocket.OPEN) return;
-              // Prepend 0xDF magic byte so backend routes to process_audio_only()
-              const raw = await e.data.arrayBuffer();
-              const tagged = new Uint8Array(raw.byteLength + 1);
-              tagged[0] = DEEPFAKE_MAGIC;
-              tagged.set(new Uint8Array(raw), 1);
-              ws.send(tagged.buffer);
-            };
-
-            dfRecorder.start();
-            dfIntervalRef.current = setInterval(() => {
-              if (dfRecorder.state === 'recording') {
-                dfRecorder.stop();
-                dfRecorder.start();
-              }
-            }, 8000);
-          } catch (err) {
-            console.warn('Background audio capture for deepfake detection unavailable:', err);
-            // Non-fatal: webspeech transcript still works, deepfake score will be N/A
-          }
-        }
-
         setStatus('live');
       } else {
         // Direct Whisper mode
@@ -307,21 +248,11 @@ const LiveCallMonitor = ({ header }) => {
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === 'update') {
-        // Apply EMA smoothing to deepfake probability and evidence breakdown before rendering
-        if (msg.deepfake_probability !== null && msg.deepfake_probability !== undefined) {
-          const prev = smoothedDeepfakeRef.current;
-          const smoothed = prev === null
-            ? msg.deepfake_probability
-            : EMA_ALPHA * msg.deepfake_probability + (1 - EMA_ALPHA) * prev;
-          smoothedDeepfakeRef.current = smoothed;
-          msg.deepfake_probability = parseFloat(smoothed.toFixed(4));
-        }
-
         // Smooth each evidence breakdown component independently
         if (msg.evidence_breakdown) {
           const prevBd = smoothedBreakdownRef.current || {};
           const smoothedBd = {};
-          for (const key of ['transcript', 'deepfake', 'heuristics', 'rag_match', 'verification']) {
+          for (const key of ['transcript', 'heuristics', 'rag_match', 'verification']) {
             const cur = msg.evidence_breakdown[key] ?? 0;
             const prevVal = prevBd[key] ?? cur;
             smoothedBd[key] = parseFloat((EMA_ALPHA * cur + (1 - EMA_ALPHA) * prevVal).toFixed(4));
@@ -449,26 +380,6 @@ const LiveCallMonitor = ({ header }) => {
             🤖 Local Whisper
           </button>
         </div>
-
-        {transcriptionMode === 'webspeech' && (
-          <label style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.8rem',
-            color: 'var(--text-muted)',
-            marginBottom: '1.25rem',
-            cursor: isRunning ? 'not-allowed' : 'pointer',
-          }}>
-            <input
-              type="checkbox"
-              checked={voiceCloneScan}
-              onChange={(e) => setVoiceCloneScan(e.target.checked)}
-              disabled={isRunning}
-            />
-            Voice-clone scan (parallel mic capture — turn off if speech recognition degrades)
-          </label>
-        )}
 
         <div
           className="dropzone"
@@ -598,10 +509,6 @@ const LiveCallMonitor = ({ header }) => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>Transcript Risk:</span>
                   <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{Math.round(update.evidence_breakdown.transcript * 100)}%</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>AI Voice Prob:</span>
-                  <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{update.evidence_breakdown.deepfake !== null ? `${Math.round(update.evidence_breakdown.deepfake * 100)}%` : 'N/A'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>Scam Heuristics:</span>

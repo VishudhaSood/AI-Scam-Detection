@@ -23,13 +23,11 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def startup_event():
         try:
-            # Eagerly load Whisper and AASIST models on startup to prevent lockups and DLL race conditions
+            # Eagerly load Whisper models on startup to prevent lockups and DLL race conditions
             from app.services.streaming_transcriber import StreamingTranscriber
             from app.services.whisper_service import WhisperService
-            from app.services.deepfake_detector import AASISTDetector
             StreamingTranscriber.eager_load_model()
             WhisperService.eager_load_model()
-            AASISTDetector.eager_load_model()
         except Exception as e:
             print(f"Error preloading models on startup: {e}")
 

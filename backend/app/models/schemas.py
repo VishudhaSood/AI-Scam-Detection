@@ -24,8 +24,7 @@ class EvidenceBreakdown(BaseModel):
     """
     Sub-schema detailing the individual scores contributing to the scam risk evaluation.
     """
-    transcript: float = Field(0.0, ge=0.0, le=1.0, description="Risk score from transcript analysis (Qwen).")
-    deepfake: Optional[float] = Field(None, ge=0.0, le=1.0, description="AI voice cloning spoof probability (AASIST).")
+    transcript: float = Field(0.0, ge=0.0, le=1.0, description="Risk score from transcript analysis (LLM).")
     heuristics: float = Field(0.0, ge=0.0, le=1.0, description="Keyword heuristic risk score.")
     rag_match: float = Field(0.0, ge=0.0, le=1.0, description="RAG advisory similarity match strength.")
     verification: float = Field(0.0, ge=0.0, le=1.0, description="Score based on verification question responses.")
@@ -37,11 +36,7 @@ class AnalysisResponse(BaseModel):
     transcript: str = Field(..., description="The analyzed transcript text.")
     risk_score: float = Field(..., ge=0.0, le=1.0, description="Risk level from 0.0 (safe) to 1.0 (high scam risk).")
     label: str = Field(..., description="Safety label: SAFE, SUSPICIOUS, or SCAM.")
-    scam_category: str = Field(..., description="Detected scam category (e.g., Bank Impersonation, Lottery, None).")
-    deepfake_probability: Optional[float] = Field(None, ge=0.0, le=1.0, description="Probability of synthetic voice generation.")
-    deepfake_label: Optional[str] = Field(None, description="Spoof classification label: REAL or SPOOF.")
-    deepfake_confidence: Optional[float] = Field(None, description="Winning class confidence for voice anti-spoofing.")
-    deepfake_model: Optional[str] = Field(None, description="The anti-spoofing model identifier (e.g. 'AASIST').")
+    scam_category: str = Field(..., description="Detected scam category (e.g., Digital Arrest, Bank Impersonation, Lottery, None).")
     evidence_breakdown: Optional[EvidenceBreakdown] = Field(None, description="Scores breakdown of the evaluated scam evidence components.")
     overall_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Overall confidence based on transcript length and audits done.")
     explanation: str = Field(..., description="LLM-generated explanation of why the call was classified this way.")
@@ -118,10 +113,6 @@ class LiveUpdate(BaseModel):
     advisories: List[Advisory] = Field(default=[], description="Matched advisories from RAG retrieval.")
     
     # Milestone 9: Extended evidence fusion metrics
-    deepfake_probability: Optional[float] = Field(None, ge=0.0, le=1.0, description="AI voice clone spoof probability.")
-    deepfake_label: Optional[str] = Field(None, description="Voice spoof classification: REAL or SPOOF.")
-    deepfake_confidence: Optional[float] = Field(None, description="Anti-spoofing prediction confidence.")
-    deepfake_model: Optional[str] = Field(None, description="Deepfake model name.")
     evidence_breakdown: Optional[EvidenceBreakdown] = Field(None, description="Detailed score contributions from multiple sources.")
     overall_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Overall evidence backing confidence.")
     reasoning_trace: List[str] = Field(default=[], description="Step-by-step evidence reasoning steps.")

@@ -4,7 +4,6 @@ import numpy as np
 from fastapi.concurrency import run_in_threadpool
 from app.services.streaming_transcriber import StreamingTranscriber
 from app.services.heuristic_scorer import HeuristicScorer
-from app.services.deepfake_detector import AASISTDetector, DeepfakeResult
 from app.services.risk_engine import AdaptiveRiskEngine, EvidenceFusionEngine
 from app.services.evidence_orchestrator import EvidenceOrchestrator
 
@@ -54,17 +53,8 @@ class LiveSession:
         self.sticky_questions = []
         self.sticky_safe_actions = []
 
-        # AASIST Deepfake detection state
-        self.last_deepfake_result = DeepfakeResult(
-            probability=None,
-            label=None,
-            confidence=None,
-            model="AASIST",
-            latency_ms=0.0
-        )
         self.last_breakdown = {
             "transcript": 0.0,
-            "deepfake": 0.0,
             "heuristics": 0.0,
             "rag_match": 0.0,
             "verification": 0.0
@@ -76,8 +66,6 @@ class LiveSession:
         """
         Processes a client-side text chunk from browser-native Web Speech API,
         updating the transcript and computing risk scores in real-time.
-        Deepfake detection is handled separately by process_audio_only() when
-        background MediaRecorder audio is available.
         """
         self.committed_text = committed
         self.partial_text = partial
@@ -88,28 +76,6 @@ class LiveSession:
             
         heuristic_result = HeuristicScorer.score(full_transcript)
         return await self._evaluate_risk_and_llm(full_transcript, heuristic_result.trigger_llm)
-
-    async def process_audio_only(self, audio_bytes: bytes) -> None:
-        """
-        AASIST-only analysis path for webspeech hybrid mode.
-        Called when a 0xDF-tagged audio frame arrives from the background MediaRecorder.
-        Runs AASIST deepfake detection on the real audio bytes and updates
-        last_deepfake_result WITHOUT re-running Whisper STT or risk fusion.
-        The next text_chunk cycle will pick up the updated deepfake result automatically.
-        """
-        if not audio_bytes or len(audio_bytes) < 1000:
-            return
-        full_transcript = self.committed_text + " " + self.partial_text
-        self.last_deepfake_result = await run_in_threadpool(
-            AASISTDetector.detect,
-            audio_bytes,
-            None,               # No filename in live streams
-            full_transcript.strip() or None
-        )
-        logger.debug(
-            f"[process_audio_only] AASIST result: "
-            f"prob={self.last_deepfake_result.probability} label={self.last_deepfake_result.label}"
-        )
 
     async def process_cycle(self, new_chunk: bytes) -> dict:
         """
@@ -163,19 +129,6 @@ class LiveSession:
         full_transcript = self.committed_text
         if self.partial_text:
             full_transcript += (" " if full_transcript else "") + self.partial_text
-
-        # Extract current cycle PCM for AASIST anti-spoofing analysis
-        if is_webm:
-            current_cycle_pcm = pcm_data[-80000:] if pcm_data.size >= 80000 else pcm_data
-        else:
-            current_cycle_pcm = pcm_chunk
-
-        self.last_deepfake_result = await run_in_threadpool(
-            AASISTDetector.detect, 
-            current_cycle_pcm, 
-            None, 
-            full_transcript
-        )
             
         heuristic_result = HeuristicScorer.score(full_transcript)
         return await self._evaluate_risk_and_llm(full_transcript, heuristic_result.trigger_llm)
@@ -256,10 +209,6 @@ class LiveSession:
             "safe_actions": safe_actions,
             "advisories": advisories_json,
             "trigger_llm": trigger_llm,
-            "deepfake_probability": self.last_deepfake_result.probability,
-            "deepfake_label": self.last_deepfake_result.label,
-            "deepfake_confidence": self.last_deepfake_result.confidence,
-            "deepfake_model": self.last_deepfake_result.model,
             "evidence_breakdown": self.last_breakdown,
             "overall_confidence": confidence,
             "reasoning_trace": self.last_reasoning_trace
