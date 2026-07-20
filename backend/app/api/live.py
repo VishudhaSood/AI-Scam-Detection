@@ -137,7 +137,10 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
     if last_update is not None:
         transcript = (last_update.transcript_committed + " " + (last_update.transcript_partial or "")).strip()
 
-    risk_score  = last_update.risk_raw       if last_update else 0.0
+    # Use the smoothed/ratcheted score, not risk_raw: the in-call gauge and
+    # coach mode are driven by risk_smoothed, so the persisted final report
+    # must match what the user actually saw (FLAWS_AND_IMPROVEMENTS.md §5.3).
+    risk_score  = last_update.risk_smoothed  if last_update else 0.0
     label       = last_update.label          if last_update else "SAFE"
     scam_cat    = last_update.scam_category  if last_update else "None"
     advisories  = last_update.advisories     if last_update else []
