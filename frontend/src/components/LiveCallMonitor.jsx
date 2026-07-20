@@ -515,7 +515,7 @@ const LiveCallMonitor = ({ header }) => {
                   <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{Math.round(update.evidence_breakdown.heuristics * 100)}%</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                  <span style={{ color: 'var(--text-secondary)' }}>RBI Advisory Match:</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>Regulatory Advisory Match:</span>
                   <span style={{ fontWeight: 600, color: 'var(--text-primary)', transition: 'all 0.8s ease' }}>{Math.round(update.evidence_breakdown.rag_match * 100)}%</span>
                 </div>
                 {update.evidence_breakdown.verification > 0.0 && (

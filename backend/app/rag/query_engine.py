@@ -69,9 +69,15 @@ class RAGQueryEngine:
             if collection.count() == 0:
                 logger.warning("Vector collection is empty. Run index_docs.py first.")
                 return []
+
+            # Use active tail (last 40 words) for long transcripts to maintain tight vector distance
+            query_text = transcript
+            words = transcript.split()
+            if len(words) > 40:
+                query_text = " ".join(words[-40:])
                 
             results = collection.query(
-                query_texts=[transcript],
+                query_texts=[query_text],
                 n_results=n_results
             )
             
@@ -83,7 +89,8 @@ class RAGQueryEngine:
                 for i, meta in enumerate(metadata_list):
                     dist = distances[i] if i < len(distances) else 0.0
                     
-                    if dist <= 1.25:
+                    # Increased threshold cutoff to 1.55 to prevent false negatives on long calls
+                    if dist <= 1.55:
                         advisories.append(Advisory(
                             title=meta.get("title", "Unknown Advisory"),
                             source=meta.get("source", "Unknown"),

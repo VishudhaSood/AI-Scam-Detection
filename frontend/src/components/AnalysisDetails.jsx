@@ -135,7 +135,7 @@ RECOMMENDED DEFENSIVE ACTIONS
               </div>
             </div>
             <div className="evidence-item">
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>RBI Advisory Match</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Regulatory Advisory Match</div>
               <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-primary)' }}>
                 {Math.round(evidence_breakdown.rag_match * 100)}%
               </div>
