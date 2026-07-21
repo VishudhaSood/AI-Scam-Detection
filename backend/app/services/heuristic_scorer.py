@@ -7,10 +7,11 @@ from typing import List
 # within ~60 characters before the keyword match
 NEGATION_PATTERNS = [
     r"\bdon'?t\b", r"\bdo\s+not\b", r"\bnever\b", r"\bwon'?t\b",
-    r"\bwouldn'?t\b", r"\bwill\s+not\b", r"\bshall\s+not\b",
+    r"\bwouldn'?t\b", r"\bwill\s+not\b", r"\bshall\s+not\b", r"\bno\b",
     r"\brefuse\s+to\b", r"\bwarning\s+about\b",
     r"\bnot\s+share\b", r"\bnot\s+give\b", r"\bnot\s+ask\b", r"\bnot\s+request\b",
-    r"\bnot\s+send\b", r"\bavoid\b",
+    r"\bnot\s+send\b", r"\bavoid\b", r"\bnot\s+required\b", r"\bno\s+payment\b",
+    r"\bno\s+fee\b", r"\bno\s+charge\b", r"\bno\s+money\b", r"\bfree\b",
     r"\bdon'?t\s+share\b", r"\bdon'?t\s+give\b", r"\bdon'?t\s+send\b", r"\bdon'?t\s+ask\b",
     r"\bdo\s+not\s+share\b", r"\bdo\s+not\s+give\b", r"\bdo\s+not\s+send\b", r"\bdo\s+not\s+ask\b",
     r"\bmat\s+do\b", r"\bmat\s+dena\b", r"\bmat\s+batao\b", r"\bmat\s+bhej(?:o|na)\b",

@@ -18,8 +18,8 @@ class EvidenceFusionEngine:
     # Sum of all weights = 1.0
     # Note: Deepfake/AASIST removed — its parallel mic capture degraded WebSpeech.
     WEIGHTS = {
-        "transcript": 0.45,      # LLM analysis (Groq llama-3.3)
-        "heuristics": 0.25,      # Tiered keyword scanner
+        "transcript": 0.60,      # LLM analysis (Groq llama-3.3) - primary semantic authority
+        "heuristics": 0.10,      # Fast keyword scanner - light tripwire signal
         "rag_match": 0.20,       # ChromaDB advisory match strength
         "verification": 0.10      # Caller response to verification questions
     }
