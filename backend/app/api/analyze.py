@@ -1,5 +1,5 @@
 from fastapi import APIRouter, File, UploadFile, Form, Body, HTTPException, status, Depends
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from fastapi.concurrency import run_in_threadpool
 from app.models.schemas import AnalysisResponse, EvidenceBreakdown
