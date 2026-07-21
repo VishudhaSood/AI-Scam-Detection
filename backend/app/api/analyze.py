@@ -8,6 +8,7 @@ from app.services.whisper_service import WhisperService
 from app.services.risk_engine import EvidenceFusionEngine, AdaptiveRiskEngine
 from app.services.heuristic_scorer import HeuristicScorer
 from app.rag.query_engine import RAGQueryEngine
+from app.services.report_generator import ReportGenerator
 from app.database.connection import get_db
 from app.database import crud
 
@@ -148,5 +149,4 @@ async def generate_report(
     Generates a fact-constrained LLM executive summary and formatted cybercrime
     complaint report text along with a cryptographic SHA-256 audit hash.
     """
-    from app.services.report_generator import ReportGenerator
     return await ReportGenerator.generate_report(data)

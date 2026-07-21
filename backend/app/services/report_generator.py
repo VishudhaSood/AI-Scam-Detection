@@ -3,6 +3,13 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List
 
+from fastapi.concurrency import run_in_threadpool
+
+# Imported at module scope, not inside the request handler: resolving this
+# import pulls in the OpenAI SDK and the vector store and costs ~2s the first
+# time, which would otherwise block the event loop on the first report request.
+from app.rag.query_engine import _get_llm_client
+
 logger = logging.getLogger("app.services.report_generator")
 
 
@@ -141,7 +148,6 @@ OFFICIAL REPORTING HELPLINES & PORTALS
         )
 
         try:
-            from app.rag.query_engine import _get_llm_client
             client, model = _get_llm_client()
 
             system_prompt = (
@@ -153,15 +159,21 @@ OFFICIAL REPORTING HELPLINES & PORTALS
 
             prompt = f"FACT BULLETS:\n{fact_bullets}\n\nWrite a formal 2-sentence executive summary:"
 
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=150,
-                timeout=8.0
+            # _get_llm_client() returns the SYNCHRONOUS OpenAI client, so this call
+            # blocks its thread until Groq answers. Run it off the event loop the
+            # same way whisper_reasoning.py does — otherwise the mid-call "Prepare
+            # Complaint" button freezes every live WebSocket session for up to 8s.
+            response = await run_in_threadpool(
+                lambda: client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=150,
+                    timeout=8.0
+                )
             )
 
             result = response.choices[0].message.content.strip()

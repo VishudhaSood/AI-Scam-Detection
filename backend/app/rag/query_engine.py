@@ -70,34 +70,55 @@ class RAGQueryEngine:
                 logger.warning("Vector collection is empty. Run index_docs.py first.")
                 return []
 
-            # Use active tail (last 40 words) for long transcripts to maintain tight vector distance
-            query_text = transcript
+            # Query the full transcript AND its active tail, then keep the best
+            # (lowest) distance per advisory. Querying the tail alone discards
+            # the scammer's pitch, which on a real call lands early and is
+            # followed by the victim reacting — so a long call would silently
+            # lose its advisory citation entirely.
+            queries = [transcript]
             words = transcript.split()
             if len(words) > 40:
-                query_text = " ".join(words[-40:])
-                
-            results = collection.query(
-                query_texts=[query_text],
-                n_results=n_results
-            )
-            
-            advisories = []
-            if results and "metadatas" in results and results["metadatas"]:
+                queries.append(" ".join(words[-40:]))
+
+            # title -> (distance, metadata), keeping the closest match seen
+            best: Dict[str, tuple] = {}
+            for query_text in queries:
+                results = collection.query(
+                    query_texts=[query_text],
+                    n_results=n_results
+                )
+
+                if not results or not results.get("metadatas"):
+                    continue
+
                 metadata_list = results["metadatas"][0]
-                distances = results.get("distances", [[]])[0] if "distances" in results and results["distances"] else []
-                
+                distances = results.get("distances", [[]])[0] if results.get("distances") else []
+
                 for i, meta in enumerate(metadata_list):
                     dist = distances[i] if i < len(distances) else 0.0
-                    
-                    # Increased threshold cutoff to 1.55 to prevent false negatives on long calls
-                    if dist <= 1.55:
-                        advisories.append(Advisory(
-                            title=meta.get("title", "Unknown Advisory"),
-                            source=meta.get("source", "Unknown"),
-                            description=meta.get("description", "No details available."),
-                            url=meta.get("url", None)
-                        ))
-            return advisories
+
+                    # Threshold cutoff. Note this is inert on the FallbackCollection
+                    # path (its distance is 1 - Jaccard, so never above 1.0); it only
+                    # bites if real ChromaDB L2 distances are ever restored.
+                    if dist > 1.55:
+                        continue
+
+                    title = meta.get("title", "Unknown Advisory")
+                    if title not in best or dist < best[title][0]:
+                        best[title] = (dist, meta)
+
+            # Closest first, capped at the caller's requested result count
+            ranked = sorted(best.values(), key=lambda pair: pair[0])[:n_results]
+
+            return [
+                Advisory(
+                    title=meta.get("title", "Unknown Advisory"),
+                    source=meta.get("source", "Unknown"),
+                    description=meta.get("description", "No details available."),
+                    url=meta.get("url", None)
+                )
+                for _, meta in ranked
+            ]
         except Exception as e:
             logger.error(f"Error querying vector store: {e}")
             return []
