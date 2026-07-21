@@ -26,8 +26,12 @@ It combines **Real-time Web Speech Transcription**, **Groq Llama-3.3 LLM Reasoni
 - **Hinglish Scam Scanner**: Detects mixed Hindi-English scam pressure phrases (*"paisa transfer karo"*, *"khata block ho jayega"*, *"police aayegi"*, *"giraftari warrant"*, *"penalty bharna padega"*).
 - **Negation & Context Awareness**: Intelligent context understanding prevents false alarms. Protective advice (e.g., *"do not share your OTP"* or *"never give your password"*) is correctly recognized as **SAFE**.
 
-### 📄 3. One-Click Cybercrime Complaint Generator
-- **Helpline 1930 & Portal Integration**: When an audit returns a `SUSPICIOUS` or `SCAM` rating, a **"📥 Download Complaint Draft (1930)"** button generates a pre-formatted legal incident report ready for submission to [cybercrime.gov.in](https://cybercrime.gov.in) and Helpline **1930**.
+### 📄 3. Interactive Cybercrime Complaint Generator & Audit Trail
+- **Multi-Portal Reporting Links**: Direct quick links to **Helpline 1930** ([cybercrime.gov.in](https://cybercrime.gov.in)), **DoT Chakshu** ([sancharsaathi.gov.in/sachet](https://sancharsaathi.gov.in/sachet)), and **RBI Sachet Fraud Portal** ([sachet.rbi.org.in](https://sachet.rbi.org.in)).
+- **Interactive Complaint Editor Modal (`ReportModal.jsx`)**: Pop-up modal with an editable complaint text body, form inputs for victim details (Complainant Name, Impersonated Bank, Financial Loss Amount ₹, Transaction UTR Ref #), copy to clipboard, and official `.txt` report download.
+- **Mid-Call Complaint Shortcut**: A prominent **"🚨 Prepare Cybercrime Complaint Now"** shortcut button inside the **DANGER** live coaching banner allows users to prepare and edit complaint drafts mid-call without waiting to end the session.
+- **Fact-Constrained LLM Summaries**: Powered by `ReportGenerator` service using Groq to write formal 2-sentence executive summaries bounded strictly by verified threat telemetry.
+- **Real-Time SHA-256 Legal Audit Hash**: Client-side Web Crypto API (`crypto.subtle.digest`) re-computes a 64-character SHA-256 cryptographic audit hash in real time as text is edited, stamping a tamper-proof `DIGITAL INTEGRITY & AUDIT TRAIL` signature at the bottom of the complaint file.
 
 ### 📚 4. RAG Regulatory & Banking Knowledge Base
 - **45 Official Advisories Indexed**: Comprehensive corpus covering RBI, CERT-In, MHA, SEBI, IRDAI, EPFO, FIU-IND, RERA, and **30+ major Indian Public, Private, Small Finance, & Payments Banks**.
