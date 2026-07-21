@@ -7,6 +7,7 @@ from app.services.analyzer import AnalyzerService
 from app.services.whisper_service import WhisperService
 from app.services.risk_engine import EvidenceFusionEngine, AdaptiveRiskEngine
 from app.services.heuristic_scorer import HeuristicScorer
+from app.rag.query_engine import RAGQueryEngine
 from app.database.connection import get_db
 from app.database import crud
 
@@ -107,18 +108,28 @@ async def get_history(
 ) -> List[AnalysisResponse]:
     """
     Retrieves the history of call scan audits.
+
+    Reads stored fields only — does not re-run a full LLM analysis per row.
+    That used to call AnalyzerService.analyze_transcript() (an LLM audit) for
+    every saved log just to fetch advisories, burning API quota on every
+    drawer open and leaving evidence_breakdown/overall_confidence as a fresh,
+    unrelated re-analysis that could visibly disagree with the stored label
+    (FLAWS_AND_IMPROVEMENTS.md §2.9). Advisories are still looked up, but via
+    the local vector-store query only (no LLM call).
     """
     db_logs = crud.get_analysis_history(db, limit=limit)
-    
-    # Convert database models back to schemas and enrich them with advisories dynamically
+
     results = []
     for log in db_logs:
-        response = AnalyzerService.analyze_transcript(log.transcript)
-        response.risk_score = log.risk_score
-        response.label = log.label
-        response.scam_category = log.scam_category
-        response.explanation = log.explanation
-        response.analyzed_at = log.analyzed_at
-        results.append(response)
-        
+        advisories = RAGQueryEngine.query_advisories(log.transcript)
+        results.append(AnalysisResponse(
+            transcript=log.transcript,
+            risk_score=log.risk_score,
+            label=log.label,
+            scam_category=log.scam_category,
+            explanation=log.explanation,
+            advisories=advisories,
+            analyzed_at=log.analyzed_at
+        ))
+
     return results
