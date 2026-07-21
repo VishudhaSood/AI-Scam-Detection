@@ -42,6 +42,11 @@ class AnalysisResponse(BaseModel):
     explanation: str = Field(..., description="LLM-generated explanation of why the call was classified this way.")
     advisories: List[Advisory] = Field(default=[], description="List of matched RBI or CERT-In advisories from RAG.")
     reasoning_trace: List[str] = Field(default=[], description="Step-by-step audit reasoning trace from Evidence Fusion.")
+    session_id: Optional[str] = Field(None, description="Session ID if derived from live session.")
+    caller_number: Optional[str] = Field(None, description="User-provided caller phone number.")
+    duration_s: Optional[float] = Field(None, description="Session duration in seconds.")
+    peak_risk: Optional[float] = Field(None, description="Peak risk score reached during the session.")
+    score_timeline: Optional[str] = Field(None, description="JSON list of smoothed risk scores over time.")
     analyzed_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of when the analysis was performed.")
 
 

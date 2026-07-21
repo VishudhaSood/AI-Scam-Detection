@@ -280,6 +280,47 @@ const Dashboard = () => {
     </div>
   );
 
+  const renderSparkline = (timelineJson, label) => {
+    if (!timelineJson) return null;
+    let scores = [];
+    try {
+      scores = typeof timelineJson === 'string' ? JSON.parse(timelineJson) : timelineJson;
+    } catch (e) {
+      return null;
+    }
+    if (!Array.isArray(scores) || scores.length < 2) return null;
+
+    const width = 70;
+    const height = 22;
+    const padding = 2;
+
+    const points = scores.map((val, idx) => {
+      const x = padding + (idx / (scores.length - 1)) * (width - 2 * padding);
+      const y = height - padding - Math.min(1.0, Math.max(0.0, val)) * (height - 2 * padding);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    const strokeColor = label === 'SCAM' ? '#ef4444' : label === 'SUSPICIOUS' ? '#f59e0b' : '#10b981';
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginLeft: '0.5rem', marginRight: '0.5rem', flexShrink: 0 }}>
+        <svg width={width} height={height} style={{ overflow: 'visible' }}>
+          <polyline
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={points}
+          />
+        </svg>
+        <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          Risk Timeline
+        </span>
+      </div>
+    );
+  };
+
   // History modal markup shared across all tabs
   const historyModalMarkup = showHistory && (
     <div style={{
@@ -298,7 +339,7 @@ const Dashboard = () => {
     }}>
       <div className="glass-panel" style={{
         width: '100%',
-        maxWidth: '650px',
+        maxWidth: '680px',
         maxHeight: '80vh',
         display: 'flex',
         flexDirection: 'column',
@@ -335,18 +376,24 @@ const Dashboard = () => {
                   cursor: 'pointer',
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'center'
+                  alignItems: 'center',
+                  gap: '0.5rem'
                 }}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', overflow: 'hidden', paddingRight: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', overflow: 'hidden', flex: 1 }}>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     {log.transcript}
                   </span>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     {new Date(log.analyzed_at).toLocaleString()} · Category: {log.scam_category}
+                    {log.caller_number ? ` · Caller: ${log.caller_number}` : ''}
+                    {log.duration_s ? ` · ${formatDuration(log.duration_s)}` : ''}
                   </span>
                 </div>
-                <span className={`risk-badge ${log.label === 'SCAM' ? 'scam' : log.label === 'SUSPICIOUS' ? 'suspicious' : 'safe'}`} style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
+
+                {renderSparkline(log.score_timeline, log.label)}
+
+                <span className={`risk-badge ${log.label === 'SCAM' ? 'scam' : log.label === 'SUSPICIOUS' ? 'suspicious' : 'safe'}`} style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }}>
                   {log.label} ({Math.round(log.risk_score * 100)}%)
                 </span>
               </div>

@@ -154,8 +154,18 @@ def _build_final_from_last_update(session, last_update: LiveUpdate | None) -> Li
         overall_confidence = getattr(last_update, "overall_confidence", 0.0)
         reasoning_trace = getattr(last_update, "reasoning_trace", [])
 
+    duration_s = round(time.time() - session.start_time, 1) if hasattr(session, "start_time") else (last_update.elapsed_s if last_update else 0.0)
+    timeline = getattr(session, "score_timeline", [])
+    peak_risk = max(timeline) if timeline else (last_update.risk_smoothed if last_update else 0.0)
+    score_timeline_json = json.dumps(timeline) if timeline else None
+    caller_num = getattr(session, "caller_number", None)
+
     return LiveFinal(
         session_id=session.session_id,
+        caller_number=caller_num,
+        duration_s=duration_s,
+        peak_risk=peak_risk,
+        score_timeline=score_timeline_json,
         transcript=transcript or "(no speech captured)",
         risk_score=risk_score,
         label=label,

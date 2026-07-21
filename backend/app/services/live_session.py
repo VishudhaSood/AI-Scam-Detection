@@ -29,6 +29,7 @@ class LiveSession:
         self.transcriber = StreamingTranscriber()
         self.start_time = time.time()
         self.risk_engine = AdaptiveRiskEngine()
+        self.score_timeline = []
 
         # Incremental LLM audit state variables
         self.llm_audits_done = 0
@@ -148,6 +149,7 @@ class LiveSession:
         
         # Cache the reasoning trace for inclusion in the final report
         self.last_reasoning_trace = eval_result["reasoning_trace"]
+        self.score_timeline.append(round(eval_result["risk_smoothed"], 3))
         
         # Determine combined red flags
         heuristic_result = HeuristicScorer.score(full_transcript)

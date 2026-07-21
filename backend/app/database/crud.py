@@ -13,6 +13,11 @@ def save_analysis_result(db: Session, response_data: AnalysisResponse) -> CallLo
         scam_category=response_data.scam_category,
         deepfake_probability=getattr(response_data, "deepfake_probability", None),
         explanation=response_data.explanation,
+        session_id=getattr(response_data, "session_id", None),
+        caller_number=getattr(response_data, "caller_number", None),
+        duration_s=getattr(response_data, "duration_s", None),
+        peak_risk=getattr(response_data, "peak_risk", None),
+        score_timeline=getattr(response_data, "score_timeline", None),
         analyzed_at=response_data.analyzed_at
     )
     db.add(db_log)
