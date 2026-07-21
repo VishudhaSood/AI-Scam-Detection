@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) => {
+const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, isLoading, data }) => {
   const [reportContent, setReportContent] = useState('');
   const [currentHash, setCurrentHash] = useState(sha256Hash || '');
   const [copied, setCopied] = useState(false);
@@ -11,21 +11,34 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
   const [amountLost, setAmountLost] = useState('');
   const [utrRef, setUtrRef] = useState('');
 
+  // Mirror the incoming draft exactly, INCLUDING when it is cleared to null while
+  // a new one is being generated. Guarding on truthiness here would leave the
+  // previous incident's text on screen during the fetch.
   useEffect(() => {
-    if (initialReportText) {
-      setReportContent(initialReportText);
-    }
+    setReportContent(initialReportText || '');
   }, [initialReportText]);
 
   useEffect(() => {
-    if (sha256Hash) {
-      setCurrentHash(sha256Hash);
-    }
+    setCurrentHash(sha256Hash || '');
   }, [sha256Hash]);
+
+  // Victim details belong to one incident — reset them when a different draft
+  // arrives, so a previous complainant's name or loss amount can never be
+  // appended to someone else's complaint.
+  useEffect(() => {
+    setVictimName('');
+    setBankName('');
+    setAmountLost('');
+    setUtrRef('');
+  }, [initialReportText]);
 
   // Recalculate SHA-256 hash dynamically on text changes
   useEffect(() => {
-    if (reportContent && window.crypto && window.crypto.subtle) {
+    if (!reportContent) {
+      setCurrentHash('');
+      return;
+    }
+    if (window.crypto && window.crypto.subtle) {
       const encoder = new TextEncoder();
       const dataBuffer = encoder.encode(reportContent);
       window.crypto.subtle.digest('SHA-256', dataBuffer).then(hashBuffer => {
@@ -111,7 +124,7 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
               📝 Cybercrime Incident Complaint Editor
             </h3>
             <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue, #3b82f6)', fontFamily: 'var(--font-mono)' }}>
-              🛡️ Legal Audit SHA-256: {currentHash ? currentHash.substring(0, 24) + '...' : 'computing...'}
+              🛡️ Legal Audit SHA-256: {isLoading ? 'pending draft...' : (currentHash ? currentHash.substring(0, 24) + '...' : 'computing...')}
             </span>
           </div>
           <button
@@ -175,11 +188,12 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: '1rem' }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between' }}>
             <span>Editable Complaint Body (Review & edit before downloading)</span>
-            <span>{reportContent.length} chars</span>
+            <span>{isLoading ? 'drafting…' : `${reportContent.length} chars`}</span>
           </label>
           <textarea
-            value={reportContent}
+            value={isLoading ? 'Drafting complaint from the audited call record…' : reportContent}
             onChange={(e) => setReportContent(e.target.value)}
+            readOnly={isLoading}
             rows={12}
             style={{
               width: '100%',
@@ -191,7 +205,8 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
               background: 'rgba(0, 0, 0, 0.4)',
               border: '1px solid rgba(255, 255, 255, 0.15)',
               borderRadius: '0.375rem',
-              color: '#f3f4f6',
+              color: isLoading ? 'var(--text-muted, #9ca3af)' : '#f3f4f6',
+              fontStyle: isLoading ? 'italic' : 'normal',
               resize: 'vertical'
             }}
           />
@@ -214,19 +229,23 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+            {/* Disabled until the draft arrives — otherwise these would copy or
+                download the placeholder text, or an empty document. */}
             <button
               type="button"
               onClick={handleCopy}
+              disabled={isLoading || !reportContent}
               className="submit-btn"
-              style={{ background: copied ? 'var(--color-safe, #10b981)' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem' }}
+              style={{ background: copied ? 'var(--color-safe, #10b981)' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', opacity: (isLoading || !reportContent) ? 0.45 : 1, cursor: (isLoading || !reportContent) ? 'not-allowed' : 'pointer' }}
             >
               {copied ? '✓ Copied to Clipboard!' : '📋 Copy Text'}
             </button>
             <button
               type="button"
               onClick={handleDownload}
+              disabled={isLoading || !reportContent}
               className="submit-btn"
-              style={{ width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', background: 'var(--accent-purple, #8b5cf6)' }}
+              style={{ width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', background: 'var(--accent-purple, #8b5cf6)', opacity: (isLoading || !reportContent) ? 0.45 : 1, cursor: (isLoading || !reportContent) ? 'not-allowed' : 'pointer' }}
             >
               📥 Download Official .txt Complaint
             </button>

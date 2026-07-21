@@ -11,7 +11,10 @@ def save_analysis_result(db: Session, response_data: AnalysisResponse) -> CallLo
         risk_score=response_data.risk_score,
         label=response_data.label,
         scam_category=response_data.scam_category,
-        deepfake_probability=getattr(response_data, "deepfake_probability", None) or 0.0,
+        # Stays NULL = "not checked". Voice-spoof detection (AASIST) was removed
+        # from the pipeline, so nothing measures this. Writing 0.0 would assert
+        # "we checked and it is not synthetic", which we cannot support.
+        deepfake_probability=getattr(response_data, "deepfake_probability", None),
         explanation=response_data.explanation,
         session_id=getattr(response_data, "session_id", None),
         caller_number=getattr(response_data, "caller_number", None),

@@ -24,8 +24,22 @@ const Dashboard = () => {
   const [reportData, setReportData] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
 
+  // When the incident actually happened, not when this draft was produced. A report
+  // opened later from Past Audits must carry the original call's date — that is the
+  // field police correlate against bank transaction logs.
+  const incidentTimestamp = (analysisData) => {
+    if (analysisData?.analyzed_at) {
+      const parsed = new Date(analysisData.analyzed_at);
+      if (!isNaN(parsed.getTime())) return parsed.toLocaleString();
+    }
+    return `${new Date().toLocaleString()} (call in progress at time of drafting)`;
+  };
+
   const handleOpenReportModal = async (analysisData) => {
     setShowReportModal(true);
+    // Clear first: without this the modal keeps rendering the PREVIOUS incident's
+    // complaint — fully formatted and copyable — for the seconds the LLM call takes.
+    setReportData(null);
     setLoadingReport(true);
     try {
       const response = await fetch('http://localhost:8000/api/v1/analyze/generate-report', {
@@ -42,7 +56,8 @@ INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
 National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
 ======================================================================
 
-Date & Time: ${new Date().toISOString()}
+Incident Date & Time: ${incidentTimestamp(analysisData)}
+Report Generated: ${new Date().toLocaleString()}
 Threat Evaluation Label: ${analysisData.label || 'SUSPICIOUS'} (Risk Score: ${Math.round((analysisData.risk_score || 0) * 100)}%)
 Detected Scam Category: ${analysisData.scam_category || 'Scam Suspect'}
 Caller Phone Number: ${analysisData.caller_number || 'Not Provided'}
@@ -51,7 +66,7 @@ Overall Evidence Confidence: ${Math.round((analysisData.overall_confidence || 0.
 ----------------------------------------------------------------------
 EXECUTIVE SUMMARY
 ----------------------------------------------------------------------
-On ${new Date().toLocaleDateString()}, an incoming call was audited by AI Scam Detection and flagged as ${analysisData.label || 'SUSPICIOUS'} (${Math.round((analysisData.risk_score || 0) * 100)}% risk). The transcript exhibits characteristics aligned with ${analysisData.scam_category || 'known scam patterns'}.
+On ${incidentTimestamp(analysisData)}, an incoming call was audited by AI Scam Detection and flagged as ${analysisData.label || 'SUSPICIOUS'} (${Math.round((analysisData.risk_score || 0) * 100)}% risk). The transcript exhibits characteristics aligned with ${analysisData.scam_category || 'known scam patterns'}.
 
 ----------------------------------------------------------------------
 INCIDENT TRANSCRIPT EXCERPT
@@ -95,7 +110,8 @@ INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
 National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
 ======================================================================
 
-Date & Time: ${new Date().toISOString()}
+Incident Date & Time: ${incidentTimestamp(analysisData)}
+Report Generated: ${new Date().toLocaleString()}
 Threat Evaluation Label: ${analysisData.label || 'SUSPICIOUS'} (Risk Score: ${Math.round((analysisData.risk_score || 0) * 100)}%)
 Detected Scam Category: ${analysisData.scam_category || 'Scam Suspect'}
 Caller Phone Number: ${analysisData.caller_number || 'Not Provided'}
@@ -740,6 +756,7 @@ OFFICIAL REPORTING HELPLINES & PORTALS
         onClose={() => setShowReportModal(false)}
         initialReportText={reportData?.report_text}
         sha256Hash={reportData?.sha256_hash}
+        isLoading={loadingReport}
         data={result}
       />
     </>
