@@ -95,7 +95,60 @@ argues against integrity rather than for it.
   `report_hash` columns, `POST` persists, `GET` returns the stored draft,
   "Regenerate" explicitly overwrites.
 
-## 5. Smaller, known, unactioned
+## 5. `/generate-report` has no verdict gate — the UI gate is the only one
+
+The "Prepare & Edit Cybercrime Complaint" button is gated in React
+(`AnalysisDetails.jsx:54`, `label === 'SCAM' || label === 'SUSPICIOUS'`), so a
+SAFE call cannot produce a complaint *through the app*. The endpoint has no
+equivalent check:
+
+```python
+@router.post("/generate-report")
+async def generate_report(data: Dict[str, Any] = Body(...)):
+    return await ReportGenerator.generate_report(data)
+```
+
+`Dict[str, Any]` accepts any JSON object — no schema, no required fields, no
+label check — and `ReportGenerator` fills defaults for whatever is missing.
+POSTing an empty `{}` returns a complete, downloadable police complaint:
+
+```
+INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
+National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+
+Threat Evaluation Label: SUSPICIOUS (Risk Score: 0%)
+Detected Scam Category: None
+```
+
+SUSPICIOUS only because that is the default on `report_generator.py:31`; a 0%
+risk score under a SUSPICIOUS label is self-contradictory on the face of the
+document.
+
+**Why it matters.** A UI gate is presentation, not policy — it constrains what
+a user sees, not what the server does. The concrete risk is not `curl`, it is
+the next report trigger someone adds: **Plan B item 5 specifies a per-history-
+entry "Report" action, and the history drawer lists SAFE calls too.** Wire that
+up without re-implementing the label check and safe calls start producing
+complaint drafts. This is also the one output whose downstream action is filing
+with a real helpline (1930), where a knowingly false complaint carries
+consequences for the complainant.
+
+**Severity: latent, not live.** Unreachable through the current UI; found by
+calling the service directly in a test. Flagged because it stays harmless right
+up until a second entry point exists.
+
+**Recommended:** rather than making the endpoint refuse low-risk input, make
+the document honest about whatever it is given — SCAM/SUSPICIOUS keeps
+`CYBERCRIME COMPLAINT DRAFT`; SAFE becomes `CALL AUDIT RECORD` with the
+complaint framing and 1930 portal links omitted. The endpoint is then correct
+at any input with no second gate to keep in sync, and a safe call still yields
+a useful artifact. Alongside it, replace `Dict[str, Any]` with a Pydantic
+request schema so a missing transcript is a 422 rather than a complaint about
+"(no speech captured)".
+
+**Effort ~45 min for both.**
+
+## 6. Smaller, known, unactioned
 
 - **`CoachPanel.jsx` reaction buttons** ("Caller Refused/Evasive", "Hostile")
   are local `useState` only — they show a static message, send nothing to the
