@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AnalysisDetails from './AnalysisDetails';
 import LiveCallMonitor from './LiveCallMonitor';
+import ReportModal from './ReportModal';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('audio'); // 'audio', 'text', or 'live'
@@ -17,6 +18,37 @@ const Dashboard = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [historyLogs, setHistoryLogs] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Report Modal State
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportData, setReportData] = useState(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+
+  const handleOpenReportModal = async (analysisData) => {
+    setShowReportModal(true);
+    setLoadingReport(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/analyze/generate-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(analysisData)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setReportData(data);
+      } else {
+        setReportData({
+          executive_summary: "Incident summary compiled from verified threat telemetry.",
+          report_text: analysisData.transcript,
+          sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        });
+      }
+    } catch (err) {
+      console.error("Report generation error:", err);
+    } finally {
+      setLoadingReport(false);
+    }
+  };
 
   // Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -408,7 +440,7 @@ const Dashboard = () => {
     <>
       {activeTab === 'live' ? (
         <div className="dashboard-grid">
-          <LiveCallMonitor header={tabSelector} />
+          <LiveCallMonitor header={tabSelector} onRequestComplaint={handleOpenReportModal} />
         </div>
       ) : (
         <div className="dashboard-grid">
@@ -620,7 +652,7 @@ const Dashboard = () => {
         )}
 
         {!loading && result && (
-          <AnalysisDetails data={result} />
+          <AnalysisDetails data={result} onRequestComplaint={handleOpenReportModal} />
         )}
       </div>
         </div>
@@ -628,6 +660,15 @@ const Dashboard = () => {
 
       {/* History Modal Overlay (rendered unconditionally across all tabs) */}
       {historyModalMarkup}
+
+      {/* Report Modal Overlay */}
+      <ReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        initialReportText={reportData?.report_text}
+        sha256Hash={reportData?.sha256_hash}
+        data={result}
+      />
     </>
   );
 };

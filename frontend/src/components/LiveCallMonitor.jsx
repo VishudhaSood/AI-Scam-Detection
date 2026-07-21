@@ -6,7 +6,7 @@ import CoachPanel from './CoachPanel';
 const WS_URL = 'ws://127.0.0.1:8000/api/v1/ws/live';
 const CHUNK_MS = 5000; // MediaRecorder timeslice: one binary frame every 5s
 
-const LiveCallMonitor = ({ header }) => {
+const LiveCallMonitor = ({ header, onRequestComplaint }) => {
   // Session status drives the whole UI: idle -> connecting -> live -> stopping -> ended
   const [status, setStatus] = useState('idle');
   const [callerNumber, setCallerNumber] = useState('');
@@ -473,7 +473,7 @@ const LiveCallMonitor = ({ header }) => {
             </p>
           </div>
         ) : finalResult ? (
-          <AnalysisDetails data={finalResult} />
+          <AnalysisDetails data={finalResult} onRequestComplaint={onRequestComplaint} />
         ) : (status === 'live' || update) ? (
           <div className="results-container">
             {/* Live threat header: smoothed (ratcheted) score drives the gauge */}

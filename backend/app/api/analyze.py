@@ -138,3 +138,15 @@ async def get_history(
         ))
 
     return results
+
+
+@router.post("/generate-report", status_code=status.HTTP_200_OK)
+async def generate_report(
+    data: Dict[str, Any] = Body(...)
+) -> Dict[str, Any]:
+    """
+    Generates a fact-constrained LLM executive summary and formatted cybercrime
+    complaint report text along with a cryptographic SHA-256 audit hash.
+    """
+    from app.services.report_generator import ReportGenerator
+    return await ReportGenerator.generate_report(data)

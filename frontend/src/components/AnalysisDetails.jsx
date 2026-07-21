@@ -1,7 +1,7 @@
 import React from 'react';
 import RiskGauge from './RiskGauge';
 
-const AnalysisDetails = ({ data }) => {
+const AnalysisDetails = ({ data, onRequestComplaint }) => {
   if (!data) return null;
 
   const {
@@ -23,6 +23,10 @@ const AnalysisDetails = ({ data }) => {
   };
 
   const handleDownloadComplaint = () => {
+    if (onRequestComplaint) {
+      onRequestComplaint(data);
+    }
+  };
     const reportText = `======================================================================
 INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
 National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
@@ -109,7 +113,7 @@ RECOMMENDED DEFENSIVE ACTIONS
                 gap: '0.5rem'
               }}
             >
-              📥 Download Complaint Draft (1930)
+              📝 Prepare & Edit Cybercrime Complaint (1930)
             </button>
           )}
         </div>
