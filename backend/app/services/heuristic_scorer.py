@@ -4,17 +4,20 @@ from typing import List
 
 
 # Negation phrases that suppress a keyword hit when they appear
-# within ~4 tokens before the keyword match
+# within ~60 characters before the keyword match
 NEGATION_PATTERNS = [
     r"\bdon'?t\b", r"\bdo\s+not\b", r"\bnever\b", r"\bwon'?t\b",
-    r"\bwouldn'?t\b", r"\brefuse\s+to\b", r"\bwarning\s+about\b",
-    r"\bnot\s+share\b", r"\bnot\s+give\b", r"\bavoid\b",
-    r"\bdon'?t\s+share\b", r"\bdon'?t\s+give\b",
-    r"\bmat\s+do\b", r"\bmat\s+dena\b", r"\bmat\s+batao\b",
+    r"\bwouldn'?t\b", r"\bwill\s+not\b", r"\bshall\s+not\b",
+    r"\brefuse\s+to\b", r"\bwarning\s+about\b",
+    r"\bnot\s+share\b", r"\bnot\s+give\b", r"\bnot\s+ask\b", r"\bnot\s+request\b",
+    r"\bnot\s+send\b", r"\bavoid\b",
+    r"\bdon'?t\s+share\b", r"\bdon'?t\s+give\b", r"\bdon'?t\s+send\b", r"\bdon'?t\s+ask\b",
+    r"\bdo\s+not\s+share\b", r"\bdo\s+not\s+give\b", r"\bdo\s+not\s+send\b", r"\bdo\s+not\s+ask\b",
+    r"\bmat\s+do\b", r"\bmat\s+dena\b", r"\bmat\s+batao\b", r"\bmat\s+bhej(?:o|na)\b",
 ]
 
 # Pre-compiled negation regex: matches if any negation appears in a short window
-_NEGATION_WINDOW = 40  # characters before the keyword to search for negation
+_NEGATION_WINDOW = 60  # characters before the keyword to search for negation
 
 
 @dataclass
