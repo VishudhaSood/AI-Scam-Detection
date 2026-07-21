@@ -129,6 +129,11 @@ async def get_history(
             scam_category=log.scam_category,
             explanation=log.explanation,
             advisories=advisories,
+            session_id=log.session_id,
+            caller_number=log.caller_number,
+            duration_s=log.duration_s,
+            peak_risk=log.peak_risk,
+            score_timeline=log.score_timeline,
             analyzed_at=log.analyzed_at
         ))
 
