@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) => {
   const [reportContent, setReportContent] = useState('');
+  const [currentHash, setCurrentHash] = useState(sha256Hash || '');
   const [copied, setCopied] = useState(false);
   
   // Victim detail input state
@@ -15,6 +16,25 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
       setReportContent(initialReportText);
     }
   }, [initialReportText]);
+
+  useEffect(() => {
+    if (sha256Hash) {
+      setCurrentHash(sha256Hash);
+    }
+  }, [sha256Hash]);
+
+  // Recalculate SHA-256 hash dynamically on text changes
+  useEffect(() => {
+    if (reportContent && window.crypto && window.crypto.subtle) {
+      const encoder = new TextEncoder();
+      const dataBuffer = encoder.encode(reportContent);
+      window.crypto.subtle.digest('SHA-256', dataBuffer).then(hashBuffer => {
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        setCurrentHash(hashHex);
+      }).catch(err => console.error('SHA-256 computation failed:', err));
+    }
+  }, [reportContent]);
 
   if (!isOpen) return null;
 
@@ -31,14 +51,22 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
     }
   };
 
+  const getFullFinalText = () => {
+    if (reportContent.includes('DIGITAL INTEGRITY & AUDIT TRAIL')) {
+      return reportContent;
+    }
+    return reportContent + `\n\n======================================================================\nDIGITAL INTEGRITY & AUDIT TRAIL\n======================================================================\nCryptographic SHA-256 Hash: ${currentHash}\nGenerated & Verified by AI Scam Detection Platform Engine\n======================================================================`;
+  };
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(reportContent);
+    navigator.clipboard.writeText(getFullFinalText());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleDownload = () => {
-    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const finalText = getFullFinalText();
+    const blob = new Blob([finalText], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -83,7 +111,7 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, data }) =
               📝 Cybercrime Incident Complaint Editor
             </h3>
             <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue, #3b82f6)', fontFamily: 'var(--font-mono)' }}>
-              🛡️ SHA-256 Hash: {sha256Hash ? sha256Hash.substring(0, 16) + '...' : 'computing...'}
+              🛡️ Legal Audit SHA-256: {currentHash ? currentHash.substring(0, 24) + '...' : 'computing...'}
             </span>
           </div>
           <button

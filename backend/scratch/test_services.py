@@ -8,7 +8,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import UploadFile
 from app.services.whisper_service import WhisperService
-from app.services.risk_engine import RiskEngine
+from app.services.whisper_service import WhisperService
+from app.services.risk_engine import EvidenceFusionEngine, AdaptiveRiskEngine
 
 async def run_tests():
     print("==================================================")
@@ -20,16 +21,15 @@ async def run_tests():
         file_like = io.BytesIO(dummy_bytes)
         return UploadFile(filename=filename, file=file_like)
 
-    # Test Cases for WhisperService & Deepfake detection
+    # Test Cases for WhisperService
     test_audios = [
         ("kbc_lottery_call_2026.wav", "Lottery Scam Scenario"),
         ("sbi_kyc_otp_alert.mp3", "Bank OTP/KYC Scenario"),
         ("mumbai_police_threat.m4a", "Customs/Police Scenario"),
-        ("real_human_safe_call.ogg", "Safe Human Scenario"),
-        ("synthetic_ai_cloned_voice.wav", "AI Deepfake Voice Scenario")
+        ("real_human_safe_call.ogg", "Safe Human Scenario")
     ]
 
-    print("\n--- Testing WhisperService (Transcription & Deepfake check) ---")
+    print("\n--- Testing WhisperService (Transcription check) ---")
     for filename, description in test_audios:
         print(f"\n[Test Case] {description} ({filename}):")
         
@@ -39,27 +39,27 @@ async def run_tests():
         # Test Transcription
         transcript = await WhisperService.transcribe_audio(mock_file)
         print(f"  Transcript: '{transcript}'")
-        
-        # Test Deepfake
-        deepfake_prob = await WhisperService.detect_deepfake(mock_file)
-        print(f"  Deepfake Probability: {deepfake_prob} (Is AI: {deepfake_prob >= 0.7})")
 
-    # Test Cases for RiskEngine
-    print("\n--- Testing RiskEngine (Risk Combination & Classification) ---")
+    # Test Cases for EvidenceFusionEngine & AdaptiveRiskEngine
+    print("\n--- Testing EvidenceFusionEngine (Evidence Fusion & Classification) ---")
     risk_scenarios = [
-        (0.10, 0.10, "Low Deepfake & Low Content Risk (Safe)"),
-        (0.85, 0.20, "High Deepfake but Low Content Risk (Suspicious)"),
-        (0.15, 0.90, "Low Deepfake but High Content Risk (Scam)"),
-        (0.85, 0.60, "High Deepfake + Moderate Content Risk (SCAM Escalation Override)"),
-        (0.05, 0.98, "Extreme Content Risk (SCAM Escalation Override)"),
-        (0.92, 0.92, "High Deepfake + High Content Risk (Scam)")
+        (0.10, 0.10, 0, "N/A", "Low Risk (Safe)"),
+        (0.85, 0.80, 2, "EVASIVE", "High Risk Bank Impersonation (SCAM)"),
+        (0.45, 0.40, 1, "N/A", "Suspicious Claims (SUSPICIOUS)"),
+        (0.95, 0.90, 3, "THREATENED", "Digital Arrest Threat (SCAM)")
     ]
 
-    for deepfake_p, llm_risk, desc in risk_scenarios:
-        final_risk, label = RiskEngine.calculate_combined_risk(deepfake_p, llm_risk)
+    for t_risk, h_risk, adv_count, verdict, desc in risk_scenarios:
+        fused_score, breakdown = EvidenceFusionEngine.fuse_evidence(
+            transcript_risk=t_risk,
+            heuristic_risk=h_risk,
+            advisories_count=adv_count,
+            verification_verdict=verdict
+        )
+        label = "SCAM" if fused_score >= 0.75 else "SUSPICIOUS" if fused_score >= 0.40 else "SAFE"
         print(f"\n[Scenario] {desc}:")
-        print(f"  Inputs -> Voice: {deepfake_p}, LLM: {llm_risk}")
-        print(f"  Outputs -> Final Risk Score: {final_risk}, Label: {label}")
+        print(f"  Inputs -> Transcript Risk: {t_risk}, Heuristics: {h_risk}, Advisories: {adv_count}")
+        print(f"  Outputs -> Fused Risk Score: {fused_score:.2f}, Label: {label}")
 
     print("\n==================================================")
     print("             ALL TEST SCENARIOS COMPLETED          ")

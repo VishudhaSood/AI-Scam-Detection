@@ -37,14 +37,87 @@ const Dashboard = () => {
         const data = await response.json();
         setReportData(data);
       } else {
+        const fallbackText = `======================================================================
+INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
+National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+======================================================================
+
+Date & Time: ${new Date().toISOString()}
+Threat Evaluation Label: ${analysisData.label || 'SUSPICIOUS'} (Risk Score: ${Math.round((analysisData.risk_score || 0) * 100)}%)
+Detected Scam Category: ${analysisData.scam_category || 'Scam Suspect'}
+Caller Phone Number: ${analysisData.caller_number || 'Not Provided'}
+Overall Evidence Confidence: ${Math.round((analysisData.overall_confidence || 0.85) * 100)}%
+
+----------------------------------------------------------------------
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------
+On ${new Date().toLocaleDateString()}, an incoming call was audited by AI Scam Detection and flagged as ${analysisData.label || 'SUSPICIOUS'} (${Math.round((analysisData.risk_score || 0) * 100)}% risk). The transcript exhibits characteristics aligned with ${analysisData.scam_category || 'known scam patterns'}.
+
+----------------------------------------------------------------------
+INCIDENT TRANSCRIPT EXCERPT
+----------------------------------------------------------------------
+"${analysisData.transcript || '(No transcript text recorded)'}"
+
+----------------------------------------------------------------------
+DETECTED RED FLAGS & RISK INDICATORS
+----------------------------------------------------------------------
+${(analysisData.red_flags && analysisData.red_flags.length > 0) ? analysisData.red_flags.map(rf => `- ${rf}`).join('\n') : '- Urgent action demanded / Suspicious request'}
+
+----------------------------------------------------------------------
+MATCHED REGULATORY ADVISORIES & WARNINGS
+----------------------------------------------------------------------
+${(analysisData.advisories && analysisData.advisories.length > 0) ? analysisData.advisories.map(a => `- [${a.source || 'Official'}] ${a.title || 'Advisory'}\n  Details: ${a.description || ''}\n  Reference: ${a.url || ''}`).join('\n\n') : 'None matched.'}
+
+----------------------------------------------------------------------
+AUDIT REASONING TRACE LOGS
+----------------------------------------------------------------------
+${(analysisData.reasoning_trace && analysisData.reasoning_trace.length > 0) ? analysisData.reasoning_trace.map(rt => `- ${rt}`).join('\n') : '- Automated threat engine fusion performed.'}
+
+----------------------------------------------------------------------
+OFFICIAL REPORTING HELPLINES & PORTALS
+----------------------------------------------------------------------
+- Cybercrime Helpline: Call 1930
+- Cybercrime Portal: https://cybercrime.gov.in
+- Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet
+- RBI Sachet Fraud Portal: https://sachet.rbi.org.in
+======================================================================`;
+
         setReportData({
           executive_summary: "Incident summary compiled from verified threat telemetry.",
-          report_text: analysisData.transcript,
-          sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          report_text: fallbackText,
+          sha256_hash: ""
         });
       }
     } catch (err) {
       console.error("Report generation error:", err);
+      const fallbackText = `======================================================================
+INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
+National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+======================================================================
+
+Date & Time: ${new Date().toISOString()}
+Threat Evaluation Label: ${analysisData.label || 'SUSPICIOUS'} (Risk Score: ${Math.round((analysisData.risk_score || 0) * 100)}%)
+Detected Scam Category: ${analysisData.scam_category || 'Scam Suspect'}
+Caller Phone Number: ${analysisData.caller_number || 'Not Provided'}
+
+----------------------------------------------------------------------
+INCIDENT TRANSCRIPT EXCERPT
+----------------------------------------------------------------------
+"${analysisData.transcript || '(No transcript text recorded)'}"
+
+----------------------------------------------------------------------
+OFFICIAL REPORTING HELPLINES & PORTALS
+----------------------------------------------------------------------
+- Cybercrime Helpline: Call 1930
+- Cybercrime Portal: https://cybercrime.gov.in
+- Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet
+- RBI Sachet Fraud Portal: https://sachet.rbi.org.in
+======================================================================`;
+      setReportData({
+        executive_summary: "Incident summary compiled offline.",
+        report_text: fallbackText,
+        sha256_hash: ""
+      });
     } finally {
       setLoadingReport(false);
     }

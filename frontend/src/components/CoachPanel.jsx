@@ -24,7 +24,7 @@ const MODE_META = {
   },
 };
 
-const CoachPanel = ({ update }) => {
+const CoachPanel = ({ update, onPrepareComplaint }) => {
   const [reactionLogged, setReactionLogged] = useState(null);
   const mode = update?.mode || 'MONITOR';
   const meta = MODE_META[mode] || MODE_META.MONITOR;
@@ -46,6 +46,32 @@ const CoachPanel = ({ update }) => {
           <div className="coach-hint">{meta.hint}</div>
         </div>
       </div>
+
+      {mode === 'DANGER' && onPrepareComplaint && (
+        <button
+          type="button"
+          onClick={onPrepareComplaint}
+          style={{
+            marginTop: '0.75rem',
+            width: '100%',
+            padding: '0.6rem 1rem',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            background: 'rgba(239, 68, 68, 0.25)',
+            border: '1px solid var(--color-scam, #ef4444)',
+            color: '#fff',
+            borderRadius: '0.375rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            boxShadow: '0 0 12px rgba(239, 68, 68, 0.3)'
+          }}
+        >
+          🚨 Prepare Cybercrime Complaint Now (Mid-Call Shortcut)
+        </button>
+      )}
 
       {items.length > 0 ? (
         <ol className="coach-list">

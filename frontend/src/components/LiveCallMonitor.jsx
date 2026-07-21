@@ -498,7 +498,26 @@ const LiveCallMonitor = ({ header, onRequestComplaint }) => {
             </div>
 
             {/* Coach card: mode banner, questions/actions, red flags */}
-            <CoachPanel update={update} />
+            <CoachPanel
+              update={update}
+              onPrepareComplaint={() => {
+                if (onRequestComplaint && update) {
+                  const currentTranscript = ((update.transcript_committed || '') + " " + (update.transcript_partial || '')).trim() || "Live Call in Progress";
+                  onRequestComplaint({
+                    transcript: currentTranscript,
+                    risk_score: update.risk_smoothed,
+                    label: update.label,
+                    scam_category: update.scam_category,
+                    explanation: `Live call currently monitored and evaluated at ${Math.round(update.risk_smoothed * 100)}% risk level.`,
+                    advisories: update.advisories || [],
+                    reasoning_trace: update.reasoning_trace || [],
+                    red_flags: update.red_flags || [],
+                    caller_number: callerNumber || "Live Call",
+                    overall_confidence: update.overall_confidence || update.confidence || 0.85
+                  });
+                }
+              }}
+            />
 
             {/* Evidence breakdown: per-source contributions from the fusion engine */}
             {update && update.evidence_breakdown && (

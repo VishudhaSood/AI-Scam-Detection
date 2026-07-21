@@ -30,6 +30,7 @@ class ReportGenerator:
         
         advisories: List[Dict[str, Any]] = data.get("advisories", [])
         reasoning_trace: List[str] = data.get("reasoning_trace", [])
+        red_flags: List[str] = data.get("red_flags", [])
         
         now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -43,6 +44,8 @@ class ReportGenerator:
             f"- Incident Explanation: {explanation}\n"
             f"- Transcript Excerpt: \"{transcript[:300]}\"\n"
         )
+        if red_flags:
+            fact_bullets += f"- Red Flags Heard: {', '.join(red_flags)}\n"
         if advisories:
             adv_titles = ", ".join([a.get("title", "") for a in advisories if isinstance(a, dict)])
             fact_bullets += f"- Matched Advisories: {adv_titles}\n"
@@ -67,6 +70,10 @@ class ReportGenerator:
         if reasoning_trace:
             reasoning_text = "\n".join([f"- {step}" for step in reasoning_trace])
 
+        red_flags_text = "None detected."
+        if red_flags:
+            red_flags_text = "\n".join([f"- {flag}" for flag in red_flags])
+
         full_report_text = f"""======================================================================
 INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
 National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
@@ -89,6 +96,11 @@ INCIDENT TRANSCRIPT EXCERPT
 "{transcript}"
 
 ----------------------------------------------------------------------
+DETECTED RED FLAGS & RISK INDICATORS
+----------------------------------------------------------------------
+{red_flags_text}
+
+----------------------------------------------------------------------
 MATCHED REGULATORY ADVISORIES & WARNINGS
 ----------------------------------------------------------------------
 {advisories_text}
@@ -105,7 +117,7 @@ OFFICIAL REPORTING HELPLINES & PORTALS
 - Cybercrime Portal: https://cybercrime.gov.in
 - Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet
 - RBI Sachet Fraud Portal: https://sachet.rbi.org.in
-======================================================================"""
+======================================================================="""
 
         # 4. Compute SHA-256 audit hash
         sha256_hash = hashlib.sha256(full_report_text.encode("utf-8")).hexdigest()
