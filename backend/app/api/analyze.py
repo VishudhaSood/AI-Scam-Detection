@@ -80,6 +80,11 @@ async def analyze_call(
             # The orchestrator's session path runs the stateful engine; a fresh
             # one on its first cycle passes the fused score through unchanged
             self.risk_engine = AdaptiveRiskEngine()
+            # This is a one-shot analysis: there is no multi-turn caller-verification
+            # loop here, so the verification dimension can never contribute. Lets
+            # fuse_evidence renormalize it away instead of wasting 10% of the score
+            # budget on a signal that structurally never fires for batch input.
+            self.verification_available = False
 
     temp_session = TempSession()
     

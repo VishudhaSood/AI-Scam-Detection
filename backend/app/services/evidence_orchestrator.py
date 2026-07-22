@@ -38,10 +38,17 @@ class EvidenceOrchestrator:
         evidence_list: List[Evidence] = await asyncio.gather(*tasks)
         
         # 1. Run multi-source Evidence Fusion Engine
-        fused_score, breakdown = EvidenceFusionEngine.fuse_evidence_list(evidence_list)
-        
-        # 2. Run stateful temporal risk filters and state machine
+        # verification_available is False only for a one-shot batch analysis
+        # (see TempSession in api/analyze.py) where the verification dimension can
+        # never fire; defaults True (live-call-safe) when a session doesn't say
+        # otherwise, matching LiveSession's own explicit flag.
         session = context.get("session")
+        verification_available = getattr(session, "verification_available", True)
+        fused_score, breakdown = EvidenceFusionEngine.fuse_evidence_list(
+            evidence_list, verification_available=verification_available
+        )
+
+        # 2. Run stateful temporal risk filters and state machine
         transcript = context.get("transcript", "")
         word_count = len(transcript.split())
         

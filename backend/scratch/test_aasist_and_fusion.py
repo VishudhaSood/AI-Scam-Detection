@@ -40,12 +40,18 @@ class TestAASISTAndFusion(unittest.TestCase):
         self.assertIsNone(res.confidence)
         self.assertEqual(res.model, "AASIST")
 
-    def test_evidence_fusion_dynamic_normalization(self):
+    def test_evidence_fusion_dynamic_normalization_batch_only(self):
         """
-        Verify that evidence fusion dynamically excludes verification when N/A or NOT_YET_ANSWERED,
-        and uses the 0.45 / 0.25 / 0.20 normalized weights.
+        Dynamic renormalization (excluding the dead verification weight) is only
+        safe for a one-shot batch analysis, where there is no persistent
+        AdaptiveRiskEngine ratchet floor for a higher ceiling to get stuck against.
+        Must be requested explicitly via verification_available=False (what
+        api/analyze.py's TempSession sets) — it is NOT the default, because a live
+        call's verdict also reads "N/A" before verification has run, and
+        renormalizing there crosses the ratchet-latch threshold (see
+        test_evidence_fusion_live_call_never_renormalizes below).
         """
-        # When verification is "N/A", active weights are: trans(0.45), heur(0.25), rag(0.20). Sum = 0.90.
+        # verification_available=False -> active weights: trans(0.45), heur(0.25), rag(0.20). Sum = 0.90.
         # Inputs: trans=0.50, heur=0.60, advisories=1 (rag_score=0.50), verification="N/A"
         # Weighted sum: 0.50 * 0.45 + 0.60 * 0.25 + 0.50 * 0.20 = 0.225 + 0.15 + 0.10 = 0.475
         # Fused = 0.475 / 0.90 = 0.5277... -> 0.53
@@ -54,12 +60,33 @@ class TestAASISTAndFusion(unittest.TestCase):
             transcript_risk=0.50,
             heuristic_risk=0.60,
             advisories_count=1,
-            verification_verdict="N/A"
+            verification_verdict="N/A",
+            verification_available=False
         )
         self.assertEqual(fused, 0.53)
         self.assertEqual(breakdown["transcript"], 0.50)
         self.assertEqual(breakdown["heuristics"], 0.60)
         self.assertEqual(breakdown["rag_match"], 0.50)
+        self.assertEqual(breakdown["verification"], 0.0)
+
+    def test_evidence_fusion_live_call_never_renormalizes(self):
+        """
+        A live call (verification_available=True, the default) must NOT
+        renormalize even when verdict is "N/A" — that is indistinguishable from
+        "hasn't happened yet" on a live call, and renormalizing raises the
+        pre-LLM ceiling enough to permanently strand a benign call in VERIFY.
+        """
+        # Same inputs as the batch test above, but verification_available defaults
+        # to True: weights stay fixed at trans(0.45)/heur(0.25)/rag(0.20)/verif(0.10),
+        # total=1.0 (verification_score is 0.0 since verdict isn't EVASIVE/etc).
+        # Weighted sum: 0.50*0.45 + 0.60*0.25 + 0.50*0.20 + 0 = 0.475. Fused = 0.475 -> 0.47 (floor: max(0.47,0.50)=0.50).
+        fused, breakdown = EvidenceFusionEngine.fuse_evidence(
+            transcript_risk=0.50,
+            heuristic_risk=0.60,
+            advisories_count=1,
+            verification_verdict="N/A"
+        )
+        self.assertEqual(fused, 0.50)
         self.assertEqual(breakdown["verification"], 0.0)
 
     def test_evidence_fusion_with_active_verification(self):

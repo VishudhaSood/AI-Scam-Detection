@@ -38,31 +38,38 @@ class EvidenceFusionEngine:
     @classmethod
     def fuse_evidence_list(
         cls,
-        evidence_list: List[Any]
+        evidence_list: List[Any],
+        verification_available: bool = True
     ) -> Tuple[float, Dict[str, float]]:
         """
         Adapts the new EvidenceProvider outputs to the fusion logic.
+
+        verification_available: False only for a one-shot batch analysis (see
+        api/analyze.py's TempSession), where the verification dimension can never
+        fire. Defaults True — the live-call-safe behaviour — so any caller that
+        doesn't pass it keeps today's fixed weights.
         """
         # Map list of Evidence into dict
         ev_dict = {ev.source: ev for ev in evidence_list}
-        
+
         transcript_risk = ev_dict["transcript"].score if "transcript" in ev_dict else 0.0
         heuristic_risk = ev_dict["heuristics"].score if "heuristics" in ev_dict else 0.0
         rag_score = ev_dict["rag_match"].score if "rag_match" in ev_dict else 0.0
         verification_score = ev_dict["verification"].score if "verification" in ev_dict else 0.0
 
         advisories_count = int(rag_score * 2.0)
-        
+
         # Determine verdict string
         verification_verdict = "N/A"
         if "verification" in ev_dict:
             verification_verdict = ev_dict["verification"].details.get("verdict", "N/A")
-            
+
         return cls.fuse_evidence(
             transcript_risk=transcript_risk,
             heuristic_risk=heuristic_risk,
             advisories_count=advisories_count,
-            verification_verdict=verification_verdict
+            verification_verdict=verification_verdict,
+            verification_available=verification_available
         )
 
     @classmethod
@@ -71,17 +78,21 @@ class EvidenceFusionEngine:
         transcript_risk: float,
         heuristic_risk: float,
         advisories_count: int,
-        verification_verdict: str
+        verification_verdict: str,
+        verification_available: bool = True
     ) -> Tuple[float, Dict[str, float]]:
         """
         Merges 4 evidence dimensions into a raw fused score.
-        
+
         Args:
             transcript_risk: Score from LLM (0.0 to 1.0)
             heuristic_risk: Score from keyword tiers (0.0 to 1.0)
             advisories_count: Number of semantically matched advisories
             verification_verdict: EVASIVE, REFUSED, THREATENED, PLAUSIBLE, etc.
-            
+            verification_available: whether this call could EVER produce a
+                verification verdict. False for one-shot batch analyses (there is
+                no caller-verification loop there), True for a live call.
+
         Returns:
             Tuple[float, Dict[str, float]]: (fused_score, evidence_breakdown)
         """
@@ -95,11 +106,21 @@ class EvidenceFusionEngine:
         else:
             verification_score = 0.0
 
-        # 3. Determine active weights dynamically
-        # When verification is not applicable/not performed yet, we exclude it
-        # from weight calculations and normalize over the remaining dimensions.
+        # 3. Determine active weights dynamically.
+        # Renormalizing away the (structurally dead) verification weight is safe
+        # ONLY when verification could never fire at all (a one-shot batch
+        # analysis) — there the score is computed once and discarded, so there is
+        # no persistent ratchet floor for a higher ceiling to get stuck against.
+        # A LIVE call's AdaptiveRiskEngine persists across many cycles; verdict
+        # also reads "N/A" there before verification has had a chance to run, so
+        # verdict alone can't tell the two apart. Renormalizing on a live call
+        # raises the pre-LLM ceiling just enough (0.45 -> 0.50) to cross the
+        # ratchet-latch threshold (floor = 0.75 x peak never falls below the
+        # VERIFY-exit cutoff), permanently stranding a benign call in VERIFY even
+        # after the LLM later confirms SAFE. So: only renormalize when this
+        # analysis structurally can never receive a verification verdict.
         weights = cls.WEIGHTS.copy()
-        if verification_verdict in ["N/A", "NOT_YET_ANSWERED"]:
+        if not verification_available and verification_verdict in ["N/A", "NOT_YET_ANSWERED"]:
             weights["verification"] = 0.0
 
         total_weight = sum(weights.values())

@@ -46,6 +46,13 @@ class LiveSession:
         self.llm_advisories = []
         self.llm_verdict = "N/A"
         self.llm_explanation = ""
+        # Unlike a one-shot batch analysis, a live call CAN eventually ask caller-
+        # verification questions once VERIFY mode triggers — verdict just starts at
+        # "N/A" before that happens. fuse_evidence must not renormalize the
+        # verification weight away here: doing so raises the pre-LLM ceiling enough
+        # to cross the AdaptiveRiskEngine's ratchet-latch threshold (a benign early
+        # spike then never releases from VERIFY, even once the LLM later says SAFE).
+        self.verification_available = True
 
         # Sticky coach guidance: consecutive audits may return empty lists
         # (e.g. the fallback clears them once pending questions reset), which
