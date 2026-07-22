@@ -38,14 +38,23 @@ It combines **Real-time Web Speech Transcription**, **Groq Llama-3.3 LLM Reasoni
 - **Comprehensive Financial Scam Coverage**: Specialized detection for Stock Market / Mutual Fund tip scams, Crypto exchange lockup frauds, Insurance bonus claims, Provident Fund withdrawal assistance fees, Matrimonial NRI romance extortion, Travel/Hotel booking phishing, Digital Arrest, YONO APK malware, DISCOM electricity bill scams, SIM Swap / eSIM fraud, UPI QR code receive-money tricks, and credit card reward point cash-in fraud.
 - **Zero-Crash Architecture**: Uses a pure-Python fallback vector store (`FallbackCollection`) to ensure 100% reliable performance on Windows without native C++ ONNX DLL crashes.
 
-### 📊 5. Multi-Factor Evidence Fusion Engine
-Combines 4 independent signal dimensions with mathematical floor guarantees:
-- **Transcript LLM Analysis**: `45%`
-- **Scam Heuristics Scanner**: `25%`
-- **RAG Advisory Match**: `20%`
-- **Verification Question Verdict**: `10%`
+### 📊 5. Multi-Factor Evidence Fusion Engine & Dynamic Renormalization
+- **Flexible Evidence Combination**: Integrates four independent signal dimensions with transcript-floor protection (preventing weak heuristic/RAG signals from diluting high-risk LLM findings).
+- **Dynamic Weight Renormalization**: If caller verification is inactive (`"N/A"` or `"NOT_YET_ANSWERED"`), the 10% verification weight is dynamically excluded, and the score is normalized over active dimensions (Transcript: `45%`, Heuristics: `25%`, RAG: `20%`).
+- **Dynamic Explainability**: Trace logs dynamically construct weight percentage distributions based on active evidence sources.
 
-### 📜 6. Session Audit History
+### 📈 6. Advanced Confidence Scoring Engine
+- **Non-linear Word Coverage Boost**: Uses square-root length scaling ($min(1.0, \sqrt{word\_count / 40.0})$) to give a solid baseline for short texts while rapidly scaling to a full `1.0` by 40+ words.
+- **Semantic Reasoning Baseline**: Sets the reasoning factor to `1.0` as soon as at least 1 LLM transcript audit has run.
+- **Non-penalizing RAG Integration**: Treat RAG database matches as a confidence bonus rather than a baseline requirement; calls with zero matches are not penalized.
+- **Threat-Level Certainty Boost**: Automatically ensures confidence is at least `0.85` for confirmed `SCAM` results and `0.70` for `SUSPICIOUS` detections.
+
+### 🔑 7. Secure JWT Authentication
+- **User Management**: Complete user registration and login flow using FastAPI OAuth2 password bearer tokens.
+- **Session Protection**: Protects core analysis, audit history, and reporting endpoints with secure JWT signature checks (`PyJWT`).
+- **Persistent State**: Frontend React Auth Context preserves user login state across reloads.
+
+### 📜 8. Session Audit History
 - **Saved Call History Modal**: One-click **"📜 Past Audits"** drawer fetches past saved call scans from `db.sqlite3` via `/api/v1/analyze/history`.
 - **Persistent Storage**: Database files and vector indexes are preserved across server restarts.
 
