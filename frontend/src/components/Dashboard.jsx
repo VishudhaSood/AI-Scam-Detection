@@ -272,9 +272,12 @@ OFFICIAL REPORTING HELPLINES & PORTALS
   };
 
   const formatDuration = (seconds) => {
+    if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
     const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const secsNum = seconds % 60;
+    const secsFixed = secsNum.toFixed(1);
+    const secsStr = parseFloat(secsFixed) < 10 ? `0${secsFixed}` : `${secsFixed}`;
+    return `${mins.toString().padStart(2, '0')}:${secsStr}`;
   };
 
   // Drag and Drop Handlers
@@ -418,15 +421,22 @@ OFFICIAL REPORTING HELPLINES & PORTALS
     </div>
   );
 
-  const renderSparkline = (timelineJson, label) => {
-    if (!timelineJson) return null;
+  const renderSparkline = (timelineJson, label, rawScore) => {
     let scores = [];
-    try {
-      scores = typeof timelineJson === 'string' ? JSON.parse(timelineJson) : timelineJson;
-    } catch (e) {
-      return null;
+    if (timelineJson) {
+      try {
+        scores = typeof timelineJson === 'string' ? JSON.parse(timelineJson) : timelineJson;
+      } catch (e) {
+        scores = [];
+      }
     }
-    if (!Array.isArray(scores) || scores.length < 2) return null;
+
+    if (!Array.isArray(scores) || scores.length === 0) {
+      const finalScore = typeof rawScore === 'number' ? rawScore : 0.05;
+      scores = [0.05, finalScore];
+    } else if (scores.length === 1) {
+      scores = [0.05, scores[0]];
+    }
 
     const width = 70;
     const height = 22;
@@ -529,7 +539,7 @@ OFFICIAL REPORTING HELPLINES & PORTALS
                   </span>
                 </div>
 
-                {renderSparkline(log.score_timeline, log.label)}
+                {renderSparkline(log.score_timeline, log.label, log.risk_score)}
 
                 <span className={`risk-badge ${log.label === 'SCAM' ? 'scam' : log.label === 'SUSPICIOUS' ? 'suspicious' : 'safe'}`} style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }}>
                   {log.label} ({Math.round(log.risk_score * 100)}%)

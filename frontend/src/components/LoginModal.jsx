@@ -89,9 +89,6 @@ const LoginModal = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.08)', fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-          Demo account: <span style={{ fontFamily: 'var(--font-mono)' }}>demo@aiscamguard.local</span> / <span style={{ fontFamily: 'var(--font-mono)' }}>demo1234</span>
-        </div>
       </div>
     </div>
   );

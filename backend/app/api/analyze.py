@@ -98,7 +98,9 @@ async def analyze_call(
     response.label = "SCAM" if eval_result["risk_smoothed"] >= 0.75 else "SUSPICIOUS" if eval_result["risk_smoothed"] >= 0.40 else "SAFE"
     response.evidence_breakdown = EvidenceBreakdown(**eval_result["evidence_breakdown"])
     response.overall_confidence = eval_result["confidence"]
+    import json
     response.reasoning_trace = eval_result["reasoning_trace"]
+    response.score_timeline = json.dumps([0.05, round(eval_result["risk_smoothed"], 3)])
 
     # 5. Persist the log in the database, and surface its id so the frontend can
     #    later request a complaint draft that is cached against this exact call.
