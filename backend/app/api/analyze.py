@@ -11,6 +11,8 @@ from app.rag.query_engine import RAGQueryEngine
 from app.services.report_generator import ReportGenerator
 from app.database.connection import get_db
 from app.database import crud
+from app.auth.deps import get_current_user_optional
+from app.database.models import User
 
 router = APIRouter(prefix="/analyze", tags=["Analysis"])
 
@@ -18,7 +20,8 @@ router = APIRouter(prefix="/analyze", tags=["Analysis"])
 async def analyze_call(
     text: Optional[str] = Form(None, description="Direct text input of the transcript to analyze."),
     file: Optional[UploadFile] = File(None, description="Recorded audio file of the phone call."),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
 ) -> AnalysisResponse:
     """
     Analyzes a voice call transcript or audio file for potential AI scam markers.
@@ -99,7 +102,7 @@ async def analyze_call(
 
     # 5. Persist the log in the database, and surface its id so the frontend can
     #    later request a complaint draft that is cached against this exact call.
-    saved = crud.save_analysis_result(db, response)
+    saved = crud.save_analysis_result(db, response, user_id=user.id if user else None)
     response.id = saved.id
 
     return response
@@ -107,7 +110,8 @@ async def analyze_call(
 @router.get("/history", response_model=List[AnalysisResponse], status_code=status.HTTP_200_OK)
 async def get_history(
     limit: int = 20,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
 ) -> List[AnalysisResponse]:
     """
     Retrieves the history of call scan audits.
@@ -120,7 +124,7 @@ async def get_history(
     (FLAWS_AND_IMPROVEMENTS.md §2.9). Advisories are still looked up, but via
     the local vector-store query only (no LLM call).
     """
-    db_logs = crud.get_analysis_history(db, limit=limit)
+    db_logs = crud.get_analysis_history(db, limit=limit, user_id=user.id if user else None)
 
     results = []
     for log in db_logs:
@@ -147,7 +151,8 @@ async def get_history(
 @router.post("/generate-report", status_code=status.HTTP_200_OK)
 async def generate_report(
     request: ReportRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
 ) -> Dict[str, Any]:
     """
     Returns a fact-constrained complaint/audit document plus its SHA-256 seal.
@@ -169,6 +174,10 @@ async def generate_report(
     if request.log_id is not None:
         log = crud.get_call_log(db, request.log_id)
         if log is not None:
+            # Ownership: a report may be drafted/read only for your own call or an
+            # anonymous (unowned) one — never another account's call.
+            if log.user_id is not None and (user is None or log.user_id != user.id):
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "This audit belongs to another account.")
             if log.report_text and not request.regenerate:
                 # Stored draft — return it unchanged. No LLM call; stable hash.
                 return {

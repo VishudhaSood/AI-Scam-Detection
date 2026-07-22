@@ -1,6 +1,17 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey
 from app.database.connection import Base
+
+
+class User(Base):
+    """A registered account. Login is optional (see anonymous-allowed model), so a
+    CallLog may or may not reference one."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class CallLog(Base):
     """
@@ -31,3 +42,7 @@ class CallLog(Base):
     report_hash = Column(String(64), nullable=True)
     report_version = Column(Integer, nullable=True)
     report_generated_at = Column(DateTime, nullable=True)
+
+    # Owner of this audit. NULL = anonymous (a scan run while logged out); every
+    # logged-in scan carries the user id so history can be filtered per-account.
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)

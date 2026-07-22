@@ -1,13 +1,15 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.database.models import CallLog
+from app.database.models import CallLog, User
 from app.models.schemas import AnalysisResponse
 
-def save_analysis_result(db: Session, response_data: AnalysisResponse) -> CallLog:
+def save_analysis_result(db: Session, response_data: AnalysisResponse, user_id: int | None = None) -> CallLog:
     """
-    Saves an AnalysisResponse audit result into the database.
+    Saves an AnalysisResponse audit result into the database. `user_id` is the
+    owning account, or None for a scan run while logged out (anonymous).
     """
     db_log = CallLog(
+        user_id=user_id,
         transcript=response_data.transcript,
         risk_score=response_data.risk_score,
         label=response_data.label,
@@ -29,11 +31,19 @@ def save_analysis_result(db: Session, response_data: AnalysisResponse) -> CallLo
     db.refresh(db_log)
     return db_log
 
-def get_analysis_history(db: Session, limit: int = 50) -> list[CallLog]:
+def get_analysis_history(db: Session, limit: int = 50, user_id: int | None = None) -> list[CallLog]:
     """
-    Fetches the history of audited calls, sorted by the most recent first.
+    Fetches the history of audited calls for one owner, most recent first.
+    `user_id=None` returns the anonymous (NULL-owner) pile; a real id returns only
+    that account's calls. (SQLAlchemy renders `== None` as `IS NULL`.)
     """
-    return db.query(CallLog).order_by(CallLog.analyzed_at.desc()).limit(limit).all()
+    return (
+        db.query(CallLog)
+        .filter(CallLog.user_id == user_id)
+        .order_by(CallLog.analyzed_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 def get_call_log(db: Session, log_id: int) -> CallLog | None:
     """
@@ -59,3 +69,23 @@ def save_report(db: Session, log_id: int, report_text: str, report_hash: str, ve
     db.commit()
     db.refresh(log)
     return log
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    """Look up an account by (already-normalised, lower-case) email."""
+    return db.query(User).filter(User.email == email).first()
+
+
+def get_user_by_id(db: Session, user_id: int) -> User | None:
+    """Look up an account by primary key (used when resolving a bearer token)."""
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def create_user(db: Session, email: str, password_hash: str) -> User:
+    """Insert a new account. Caller is responsible for hashing the password and
+    checking the email is free."""
+    user = User(email=email, password_hash=password_hash)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user

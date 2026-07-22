@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.analyze import router as analyze_router
 from app.api.live import router as live_router
+from app.api.auth import router as auth_router
 from app.database.connection import engine, Base, init_db
 import app.database.models  # Import to register models in Base metadata
 
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
     # 2. Register API Routers
     app.include_router(analyze_router, prefix="/api/v1")
     app.include_router(live_router, prefix="/api/v1")
+    app.include_router(auth_router, prefix="/api/v1")
 
     # 3. Root Endpoint for Health Check
     @app.get("/")

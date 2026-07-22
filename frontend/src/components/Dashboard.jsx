@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import AnalysisDetails from './AnalysisDetails';
 import LiveCallMonitor from './LiveCallMonitor';
 import ReportModal from './ReportModal';
+import { useAuth } from '../context/AuthContext';
 
 const Dashboard = () => {
+  const { authFetch, token } = useAuth();
   const [activeTab, setActiveTab] = useState('audio'); // 'audio', 'text', or 'live'
   const [audioMode, setAudioMode] = useState('upload'); // 'upload' or 'record'
   const [textInput, setTextInput] = useState('');
@@ -50,7 +52,7 @@ const Dashboard = () => {
       // draft (no re-generation) or, with regenerate=true, seal a new version.
       // Mid-call drafts have no id, so the backend generates fresh and stores nothing.
       const logId = analysisData?.id ?? analysisData?.log_id ?? null;
-      const response = await fetch('http://localhost:8000/api/v1/analyze/generate-report', {
+      const response = await authFetch('http://localhost:8000/api/v1/analyze/generate-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...analysisData, log_id: logId, regenerate })
@@ -177,7 +179,7 @@ OFFICIAL REPORTING HELPLINES & PORTALS
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/v1/analyze/history?limit=20');
+      const res = await authFetch('http://127.0.0.1:8000/api/v1/analyze/history?limit=20');
       if (res.ok) {
         const data = await res.json();
         setHistoryLogs(data);
@@ -193,6 +195,13 @@ OFFICIAL REPORTING HELPLINES & PORTALS
     setShowHistory(true);
     fetchHistory();
   };
+
+  // Auth changed (login/logout): if the history drawer is open, reload it so it
+  // reflects the right owner's audits instead of the previous session's.
+  useEffect(() => {
+    if (showHistory) fetchHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const handleSelectHistoryItem = (log) => {
     setResult(log);
@@ -342,7 +351,7 @@ OFFICIAL REPORTING HELPLINES & PORTALS
     }
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/analyze', {
+      const response = await authFetch('http://127.0.0.1:8000/api/v1/analyze', {
         method: 'POST',
         body: formData,
       });

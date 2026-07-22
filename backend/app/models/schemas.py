@@ -82,6 +82,35 @@ class ReportRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Authentication — optional accounts for per-user audit history
+# ---------------------------------------------------------------------------
+
+class RegisterRequest(BaseModel):
+    """Sign-up body for POST /auth/register."""
+    email: str = Field(..., description="Login email (normalised to lower-case).")
+    password: str = Field(..., min_length=6, description="Password, at least 6 characters.")
+
+
+class LoginRequest(BaseModel):
+    """Credentials body for POST /auth/login."""
+    email: str = Field(..., description="Account email.")
+    password: str = Field(..., description="Account password.")
+
+
+class UserOut(BaseModel):
+    """Public view of an account — never includes the password hash."""
+    id: int
+    email: str
+
+
+class TokenResponse(BaseModel):
+    """Returned by register/login: the bearer token plus the account it belongs to."""
+    access_token: str = Field(..., description="JWT bearer token; send as 'Authorization: Bearer <token>'.")
+    token_type: str = Field("bearer", description="Token scheme.")
+    user: UserOut
+
+
+# ---------------------------------------------------------------------------
 # Live Call Guardian — WebSocket contract (Phase 2, NEW_ARCHITECTURE.md §4)
 #
 # Every JSON text frame on WS /api/v1/ws/live carries a "type" field that
