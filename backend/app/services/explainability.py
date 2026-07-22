@@ -29,9 +29,30 @@ class ExplainabilityEngine:
                 )
                 
         # 2. Add fusion step trace
+        total_w = sum(ev.weight for ev in evidence_list)
+        if total_w <= 0.0:
+            total_w = 1.0
+        
+        weight_parts = []
+        for ev in evidence_list:
+            if ev.weight > 0.0:
+                pct = round((ev.weight / total_w) * 100)
+                if ev.source == "transcript":
+                    label = "Transcript AI"
+                elif ev.source == "heuristics":
+                    label = "Keyword Heuristics"
+                elif ev.source == "rag_match":
+                    label = "RAG Advisories"
+                elif ev.source == "verification":
+                    label = "Verification Question Verdict"
+                else:
+                    label = ev.source.replace("_", " ").title()
+                weight_parts.append(f"{label} ({pct}%)")
+        
+        weights_str = ", ".join(weight_parts)
         trace.append(
             f"[Evidence Fusion] Combined multi-factor threat level evaluated at {round(raw_risk * 100)}%. "
-            f"Weights: Transcript AI (45%), Keyword Heuristics (25%), RAG Advisories (20%), Verification Question Verdict (10%)."
+            f"Weights: {weights_str}."
         )
         
         # 3. Add state machine and temporal risk trace

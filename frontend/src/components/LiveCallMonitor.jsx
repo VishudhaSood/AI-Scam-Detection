@@ -2,11 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import AnalysisDetails from './AnalysisDetails';
 import RiskGauge from './RiskGauge';
 import CoachPanel from './CoachPanel';
+import { useAuth } from '../context/AuthContext';
 
 const WS_URL = 'ws://127.0.0.1:8000/api/v1/ws/live';
 const CHUNK_MS = 5000; // MediaRecorder timeslice: one binary frame every 5s
 
 const LiveCallMonitor = ({ header, onRequestComplaint }) => {
+  const { token } = useAuth();
   // Session status drives the whole UI: idle -> connecting -> live -> stopping -> ended
   const [status, setStatus] = useState('idle');
   const [callerNumber, setCallerNumber] = useState('');
@@ -159,7 +161,10 @@ const LiveCallMonitor = ({ header, onRequestComplaint }) => {
 
     setStatus('connecting');
 
-    const ws = new WebSocket(WS_URL);
+    // Pass the bearer token on the socket URL (browsers can't set WS headers) so
+    // the persisted live call attributes to the logged-in user; anonymous otherwise.
+    const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = async () => {
@@ -498,7 +503,26 @@ const LiveCallMonitor = ({ header, onRequestComplaint }) => {
             </div>
 
             {/* Coach card: mode banner, questions/actions, red flags */}
-            <CoachPanel update={update} />
+            <CoachPanel
+              update={update}
+              onPrepareComplaint={() => {
+                if (onRequestComplaint && update) {
+                  const currentTranscript = ((update.transcript_committed || '') + " " + (update.transcript_partial || '')).trim() || "Live Call in Progress";
+                  onRequestComplaint({
+                    transcript: currentTranscript,
+                    risk_score: update.risk_smoothed,
+                    label: update.label,
+                    scam_category: update.scam_category,
+                    explanation: `Live call currently monitored and evaluated at ${Math.round(update.risk_smoothed * 100)}% risk level.`,
+                    advisories: update.advisories || [],
+                    reasoning_trace: update.reasoning_trace || [],
+                    red_flags: update.red_flags || [],
+                    caller_number: callerNumber || "Live Call",
+                    overall_confidence: update.overall_confidence || update.confidence || 0.85
+                  });
+                }
+              }}
+            />
 
             {/* Evidence breakdown: per-source contributions from the fusion engine */}
             {update && update.evidence_breakdown && (

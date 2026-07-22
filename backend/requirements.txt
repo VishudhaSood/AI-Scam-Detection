@@ -7,4 +7,5 @@ faster-whisper>=1.0.3
 chromadb>=0.5.0
 openai>=1.30.0
 python-dotenv>=1.0.1
+PyJWT>=2.8.0
 

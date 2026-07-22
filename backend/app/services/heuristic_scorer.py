@@ -3,22 +3,40 @@ from dataclasses import dataclass
 from typing import List
 
 
-# Negation phrases that suppress a keyword hit when they appear
-# within ~60 characters before the keyword match
-NEGATION_PATTERNS = [
-    r"\bdon'?t\b", r"\bdo\s+not\b", r"\bnever\b", r"\bwon'?t\b",
-    r"\bwouldn'?t\b", r"\bwill\s+not\b", r"\bshall\s+not\b", r"\bno\b",
-    r"\brefuse\s+to\b", r"\bwarning\s+about\b",
-    r"\bnot\s+share\b", r"\bnot\s+give\b", r"\bnot\s+ask\b", r"\bnot\s+request\b",
-    r"\bnot\s+send\b", r"\bavoid\b", r"\bnot\s+required\b", r"\bno\s+payment\b",
-    r"\bno\s+fee\b", r"\bno\s+charge\b", r"\bno\s+money\b", r"\bfree\b",
-    r"\bdon'?t\s+share\b", r"\bdon'?t\s+give\b", r"\bdon'?t\s+send\b", r"\bdon'?t\s+ask\b",
-    r"\bdo\s+not\s+share\b", r"\bdo\s+not\s+give\b", r"\bdo\s+not\s+send\b", r"\bdo\s+not\s+ask\b",
-    r"\bmat\s+do\b", r"\bmat\s+dena\b", r"\bmat\s+batao\b", r"\bmat\s+bhej(?:o|na)\b",
+# --- Negation handling: protective-advice whitelist -------------------------
+# The scanner must fire on "share your OTP" (a scammer speaking) yet stay silent
+# on "never share your OTP" (safety advice). The previous approach asked "is a
+# negation word within 60 characters BEFORE the keyword?" — a backward window
+# that breaks two ways: a second keyword outside the window still fires ("never
+# ask for your OTP or PIN" — PIN escapes and fires), and Hinglish postfix
+# negation ("OTP mat batao") puts the negation AFTER the keyword, where no
+# backward window can ever see it.
+#
+# Instead we match a closed list of protective-advice phrasings against the
+# CLAUSE containing the keyword (reading forward as well as back). This inverts
+# the failure mode: missing a protective phrasing costs one LLM audit that
+# corrects it (cheap), never a blinded scanner on a real scam (expensive).
+PROTECTIVE_PATTERNS = [
+    re.compile(p) for p in (
+        # "<authority> will never ask/call/send ..." — institutional reassurance
+        r"\b(bank|rbi|we|they|nobody|no one|officials?|police)\b[^.,;]{0,25}"
+        r"\b(never|won'?t|will not|do not|don'?t)\b[^.,;]{0,15}"
+        r"\b(ask|request|call|send|demand)",
+        # "never/don't share|give|tell ..." — direct protective instruction
+        r"\b(never|do not|don'?t|dont)\s+(share|give|send|tell|disclose|reveal|provide)\b",
+        # "no payment/fee is required/involved ..."
+        r"\bno\s+(payment|fee|charge|money|amount)\b[^.,;]{0,20}\b(required|needed|involved|asked)\b",
+        r"\b(is|are)\s+not\s+required\b",
+        # Hinglish postfix negation: "OTP mat batao", "paise mat bhejo"
+        r"\bmat\s+(do|dena|batao|bhejo|bhejna)\b",
+        # "warning about <scam>"
+        r"\bwarning\s+about\b",
+    )
 ]
 
-# Pre-compiled negation regex: matches if any negation appears in a short window
-_NEGATION_WINDOW = 60  # characters before the keyword to search for negation
+# The inspected clause runs from the previous punctuation up to this many
+# characters PAST the keyword, so postfix negation stays inside it.
+_CLAUSE_LOOKAHEAD = 40
 
 
 @dataclass
@@ -33,17 +51,24 @@ class HeuristicResult:
 
 def _is_negated(text_lower: str, match_start: int) -> bool:
     """
-    Checks whether the keyword match at `match_start` is preceded by a
-    negation phrase within a small window. If so, the keyword hit should
-    be suppressed or halved — the speaker is WARNING against the action,
-    not performing it.
+    Returns True when the keyword at `match_start` sits inside a clause that is
+    protective advice ("bank will never ask for your OTP", "OTP mat batao")
+    rather than a live scam instruction — in which case the hit is suppressed,
+    because the speaker is warning against the action, not performing it.
+
+    The clause runs from the previous sentence/clause punctuation up to a short
+    look-ahead past the keyword, so both a negation BEFORE the keyword ("never
+    share your OTP") and one AFTER it ("OTP mat batao") fall inside the span we
+    inspect. Kept under this name because app.rag.query_engine imports it.
     """
-    window_start = max(0, match_start - _NEGATION_WINDOW)
-    window = text_lower[window_start:match_start]
-    for neg in NEGATION_PATTERNS:
-        if re.search(neg, window):
-            return True
-    return False
+    clause_start = max(
+        0,
+        text_lower.rfind(",", 0, match_start) + 1,
+        text_lower.rfind(".", 0, match_start) + 1,
+        text_lower.rfind(";", 0, match_start) + 1,
+    )
+    clause = text_lower[clause_start:match_start + _CLAUSE_LOOKAHEAD]
+    return any(p.search(clause) for p in PROTECTIVE_PATTERNS)
 
 
 class HeuristicScorer:

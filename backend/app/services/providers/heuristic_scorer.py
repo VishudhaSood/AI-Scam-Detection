@@ -22,7 +22,7 @@ class HeuristicScorerProvider(EvidenceProvider):
             source=self.name,
             score=heuristic_result.risk,
             confidence=1.0 if transcript.strip() else 0.0,
-            weight=0.20,
+            weight=0.25,
             details={
                 "tier_hits": heuristic_result.tier_hits,
                 "trigger_llm": heuristic_result.trigger_llm

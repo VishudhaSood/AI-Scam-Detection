@@ -1,15 +1,18 @@
-from fastapi import APIRouter, File, UploadFile, Form, Body, HTTPException, status, Depends
+from fastapi import APIRouter, File, UploadFile, Form, HTTPException, status, Depends
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from fastapi.concurrency import run_in_threadpool
-from app.models.schemas import AnalysisResponse, EvidenceBreakdown
+from app.models.schemas import AnalysisResponse, EvidenceBreakdown, ReportRequest
 from app.services.analyzer import AnalyzerService
 from app.services.whisper_service import WhisperService
 from app.services.risk_engine import EvidenceFusionEngine, AdaptiveRiskEngine
 from app.services.heuristic_scorer import HeuristicScorer
 from app.rag.query_engine import RAGQueryEngine
+from app.services.report_generator import ReportGenerator
 from app.database.connection import get_db
 from app.database import crud
+from app.auth.deps import get_current_user_optional
+from app.database.models import User
 
 router = APIRouter(prefix="/analyze", tags=["Analysis"])
 
@@ -17,7 +20,8 @@ router = APIRouter(prefix="/analyze", tags=["Analysis"])
 async def analyze_call(
     text: Optional[str] = Form(None, description="Direct text input of the transcript to analyze."),
     file: Optional[UploadFile] = File(None, description="Recorded audio file of the phone call."),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
 ) -> AnalysisResponse:
     """
     Analyzes a voice call transcript or audio file for potential AI scam markers.
@@ -94,17 +98,22 @@ async def analyze_call(
     response.label = "SCAM" if eval_result["risk_smoothed"] >= 0.75 else "SUSPICIOUS" if eval_result["risk_smoothed"] >= 0.40 else "SAFE"
     response.evidence_breakdown = EvidenceBreakdown(**eval_result["evidence_breakdown"])
     response.overall_confidence = eval_result["confidence"]
+    import json
     response.reasoning_trace = eval_result["reasoning_trace"]
+    response.score_timeline = json.dumps([0.05, round(eval_result["risk_smoothed"], 3)])
 
-    # 5. Persist the log in the database
-    crud.save_analysis_result(db, response)
-    
+    # 5. Persist the log in the database, and surface its id so the frontend can
+    #    later request a complaint draft that is cached against this exact call.
+    saved = crud.save_analysis_result(db, response, user_id=user.id if user else None)
+    response.id = saved.id
+
     return response
 
 @router.get("/history", response_model=List[AnalysisResponse], status_code=status.HTTP_200_OK)
 async def get_history(
     limit: int = 20,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
 ) -> List[AnalysisResponse]:
     """
     Retrieves the history of call scan audits.
@@ -117,12 +126,13 @@ async def get_history(
     (FLAWS_AND_IMPROVEMENTS.md §2.9). Advisories are still looked up, but via
     the local vector-store query only (no LLM call).
     """
-    db_logs = crud.get_analysis_history(db, limit=limit)
+    db_logs = crud.get_analysis_history(db, limit=limit, user_id=user.id if user else None)
 
     results = []
     for log in db_logs:
         advisories = RAGQueryEngine.query_advisories(log.transcript)
         results.append(AnalysisResponse(
+            id=log.id,
             transcript=log.transcript,
             risk_score=log.risk_score,
             label=log.label,
@@ -142,11 +152,56 @@ async def get_history(
 
 @router.post("/generate-report", status_code=status.HTTP_200_OK)
 async def generate_report(
-    data: Dict[str, Any] = Body(...)
+    request: ReportRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user_optional),
 ) -> Dict[str, Any]:
     """
-    Generates a fact-constrained LLM executive summary and formatted cybercrime
-    complaint report text along with a cryptographic SHA-256 audit hash.
+    Returns a fact-constrained complaint/audit document plus its SHA-256 seal.
+
+    The document's nature follows the verdict: SCAM/SUSPICIOUS produces a
+    cybercrime complaint draft, SAFE a neutral CALL AUDIT RECORD (ReportGenerator
+    decides from the label). The schema requires a transcript, so an empty body
+    is a 422 rather than a complaint drafted about nothing.
+
+    Persistence: when `log_id` names a saved call, the draft is generated once and
+    stored; every later open returns that exact stored document (no LLM call, so
+    the text and its seal never drift). `regenerate=true` overwrites it with a new
+    sealed version. Mid-call drafts (no `log_id`) are generated fresh and not
+    stored, since the call is not yet persisted.
     """
-    from app.services.report_generator import ReportGenerator
-    return await ReportGenerator.generate_report(data)
+    payload = request.model_dump()
+
+    # Persisted path: a saved call we can cache the draft against.
+    if request.log_id is not None:
+        log = crud.get_call_log(db, request.log_id)
+        if log is not None:
+            # Ownership: a report may be drafted/read only for your own call or an
+            # anonymous (unowned) one — never another account's call.
+            if log.user_id is not None and (user is None or log.user_id != user.id):
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "This audit belongs to another account.")
+            if log.report_text and not request.regenerate:
+                # Stored draft — return it unchanged. No LLM call; stable hash.
+                return {
+                    "report_text": log.report_text,
+                    "sha256_hash": log.report_hash or "",
+                    "report_version": log.report_version or 1,
+                    "cached": True,
+                }
+            # First generation for this call, or an explicit Regenerate: bump the
+            # version, generate deterministically, store, and return.
+            new_version = (log.report_version or 0) + 1
+            payload["report_version"] = new_version
+            result = await ReportGenerator.generate_report(payload)
+            crud.save_report(db, request.log_id, result["report_text"], result["sha256_hash"], new_version)
+            result["report_version"] = new_version
+            result["cached"] = False
+            return result
+
+    # Ephemeral path: mid-call draft, or a call with no saved row. Generate fresh,
+    # do not store — there is no persisted call to key the document to yet.
+    payload["report_version"] = 1
+    result = await ReportGenerator.generate_report(payload)
+    result["report_version"] = 1
+    result["cached"] = False
+    return result

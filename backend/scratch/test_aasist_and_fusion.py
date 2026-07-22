@@ -40,87 +40,116 @@ class TestAASISTAndFusion(unittest.TestCase):
         self.assertIsNone(res.confidence)
         self.assertEqual(res.model, "AASIST")
 
-    def test_evidence_fusion_weighted_math(self):
+    def test_evidence_fusion_dynamic_normalization(self):
         """
-        Test that evidence fusion calculates weighted combinations correctly.
+        Verify that evidence fusion dynamically excludes verification when N/A or NOT_YET_ANSWERED,
+        and uses the 0.45 / 0.25 / 0.20 normalized weights.
         """
-        # Let's say all metrics are at 0.50
-        # Weights: trans(0.40) + deepfake(0.20) + heur(0.20) + rag(0.10) + verification(0.10)
-        # combined = 0.50 * 0.40 + 0.50 * 0.20 + 0.50 * 0.20 + 0.50 * 0.10 + 0.50 * 0.10 = 0.50
+        # When verification is "N/A", active weights are: trans(0.45), heur(0.25), rag(0.20). Sum = 0.90.
+        # Inputs: trans=0.50, heur=0.60, advisories=1 (rag_score=0.50), verification="N/A"
+        # Weighted sum: 0.50 * 0.45 + 0.60 * 0.25 + 0.50 * 0.20 = 0.225 + 0.15 + 0.10 = 0.475
+        # Fused = 0.475 / 0.90 = 0.5277... -> 0.53
+        # Floor: max(0.53, 0.50) = 0.53
         fused, breakdown = EvidenceFusionEngine.fuse_evidence(
             transcript_risk=0.50,
-            deepfake_prob=0.50,
-            heuristic_risk=0.50,
-            advisories_count=1, # rag_score = 0.5
-            verification_verdict="NOT_YET_ANSWERED" # verification_score = 0.0
-        )
-        # Expected:
-        # trans: 0.50 * 0.40 = 0.20
-        # deepfake: 0.50 * 0.20 = 0.10
-        # heur: 0.50 * 0.20 = 0.10
-        # rag_score: 0.50 * 0.10 = 0.05
-        # verification: 0.0 * 0.10 = 0.0
-        # Total sum = 0.45
-        # Normalized: 0.45
-        # But wait, deepfake (0.5) is present, so fused = max(fused, transcript_risk) -> max(0.45, 0.50) = 0.50
-        self.assertEqual(fused, 0.50)
-        self.assertEqual(breakdown["transcript"], 0.50)
-        self.assertEqual(breakdown["deepfake"], 0.50)
-        self.assertEqual(breakdown["heuristics"], 0.50)
-        self.assertEqual(breakdown["rag_match"], 0.50)
-        self.assertEqual(breakdown["verification"], 0.0)
-
-    def test_evidence_fusion_missing_deepfake(self):
-        """
-        Test that if AASIST is disabled or fails (deepfake_prob is None),
-        the engine redistributes the weights correctly.
-        """
-        # Metrics: trans(0.50), deepfake(None), heur(0.50), rag_match(0.50), verification(0.0)
-        # Active weights: trans(0.40), heur(0.20), rag(0.10), verif(0.10). Sum = 0.80
-        # Weighted sum: 0.50*0.40 + 0.50*0.20 + 0.50*0.10 + 0.0*0.10 = 0.35
-        # Normalized score: 0.35 / 0.80 = 0.4375 -> 0.44
-        fused, breakdown = EvidenceFusionEngine.fuse_evidence(
-            transcript_risk=0.50,
-            deepfake_prob=None,
-            heuristic_risk=0.50,
+            heuristic_risk=0.60,
             advisories_count=1,
             verification_verdict="N/A"
         )
-        self.assertEqual(fused, 0.44)
-        self.assertEqual(breakdown["deepfake"], 0.0)
+        self.assertEqual(fused, 0.53)
+        self.assertEqual(breakdown["transcript"], 0.50)
+        self.assertEqual(breakdown["heuristics"], 0.60)
+        self.assertEqual(breakdown["rag_match"], 0.50)
+        self.assertEqual(breakdown["verification"], 0.0)
 
-    def test_rule_low_deepfake_cannot_reduce_risk(self):
+    def test_evidence_fusion_with_active_verification(self):
         """
-        Test Rule: A low deepfake score must NEVER reduce transcript-based scam risk.
+        Verify that evidence fusion includes verification when active (e.g. EVASIVE).
         """
-        # If transcript risk is 0.80, and deepfake is 0.0 (safe)
-        # Even if weighted average is low, fused score must be >= 0.80.
+        # Active weights: trans(0.45) + heur(0.25) + rag(0.20) + verif(0.10). Sum = 1.0.
+        # Inputs: trans=0.50, heur=0.60, advisories=1 (rag_score=0.50), verification="EVASIVE" (verification_score=1.0)
+        # Weighted sum: 0.50*0.45 + 0.60*0.25 + 0.50*0.20 + 1.0*0.10 = 0.225 + 0.15 + 0.10 + 0.10 = 0.575
+        # Fused = 0.575 / 1.0 = 0.575 -> 0.58
+        # Floor: max(0.58, 0.50) = 0.58
+        fused, breakdown = EvidenceFusionEngine.fuse_evidence(
+            transcript_risk=0.50,
+            heuristic_risk=0.60,
+            advisories_count=1,
+            verification_verdict="EVASIVE"
+        )
+        self.assertEqual(fused, 0.57)
+        self.assertEqual(breakdown["verification"], 1.0)
+
+    def test_evidence_fusion_transcript_floor(self):
+        """
+        Test that fused score is always floored at the transcript risk score.
+        """
+        # Even if heuristics and RAG are low, fused score must be >= transcript risk.
+        # Inputs: trans=0.80, heur=0.10, advisories=0 (rag_score=0.0), verification="PLAUSIBLE" (verification_score=0.0, weight=0.10)
+        # Weights: sum=1.0. Weighted sum: 0.80 * 0.45 + 0.10 * 0.25 + 0.0 + 0.0 = 0.36 + 0.025 = 0.385.
+        # Fused = 0.385 / 1.0 = 0.39.
+        # Floor: max(0.39, 0.80) = 0.80.
         fused, _ = EvidenceFusionEngine.fuse_evidence(
             transcript_risk=0.80,
-            deepfake_prob=0.0,
             heuristic_risk=0.10,
             advisories_count=0,
             verification_verdict="PLAUSIBLE"
         )
-        self.assertGreaterEqual(fused, 0.80)
+        self.assertEqual(fused, 0.80)
 
-    def test_rule_deepfake_cannot_trigger_danger_alone(self):
+    def test_confidence_engine_logic(self):
         """
-        Test Rule: Deepfake probability should increase confidence but should never
-        automatically classify a call as a scam (cross into DANGER >= 0.75) if content
-        transcript risk and heuristics are low (< 0.40).
+        Verify the ConfidenceEngine upgrades:
+        - Non-linear square-root word factor: sqrt(word_count/40) capped at 1.0.
+        - Baseline audit factor: 1.0 if llm_audits_done >= 1, else 0.40.
+        - Non-penalizing RAG: 1.0 if retrieval_hits > 0, else 0.85.
+        - Threat level boost: >=0.85 if risk_score >= 0.75, >=0.70 if risk_score >= 0.40.
         """
-        # E.g., transcript_risk = 0.1, heuristics = 0.1, but deepfake_prob = 0.99
-        # Fused score must be capped at 0.74 (VERIFY state).
-        fused, _ = EvidenceFusionEngine.fuse_evidence(
-            transcript_risk=0.10,
-            deepfake_prob=0.99,
-            heuristic_risk=0.10,
-            advisories_count=0,
-            verification_verdict="N/A"
+        from app.services.risk_engine import ConfidenceEngine
+
+        # Test Case 1: Short text threat (20 words), 1 audit, 0 audio, 0 hits
+        # word_factor = sqrt(20/40) = 0.707
+        # audit_factor = 1.0
+        # audio_factor = 1.0
+        # retrieval_factor = 0.85
+        # geom_mean = (0.707 * 1.0 * 1.0 * 0.85) ** 0.25 = (0.601) ** 0.25 = 0.88
+        # With risk_score = 0.95 (SCAM): boost sets it to max(0.88, 0.85) = 0.88
+        conf = ConfidenceEngine.calculate_confidence(
+            word_count=20,
+            llm_audits_done=1,
+            audio_seconds=0.0,
+            retrieval_hits=0,
+            risk_score=0.95
         )
-        # The fused score should remain below the 0.75 DANGER threshold
-        self.assertLess(fused, 0.75)
+        self.assertEqual(conf, 0.88)
+
+        # Test Case 2: Very short call, 0 audits, 5s audio (early phase)
+        # word_factor = sqrt(5/40) = 0.353
+        # audit_factor = 0.40
+        # audio_factor = 5.0/30.0 = 0.167
+        # retrieval_factor = 0.85
+        # geom_mean = (0.353 * 0.40 * 0.167 * 0.85) ** 0.25 = 0.38
+        # With risk_score = 0.10: no boost
+        conf = ConfidenceEngine.calculate_confidence(
+            word_count=5,
+            llm_audits_done=0,
+            audio_seconds=5.0,
+            retrieval_hits=0,
+            risk_score=0.10
+        )
+        self.assertEqual(conf, 0.38)
+
+        # Test Case 3: High threat boost verification
+        # Suppose confidence math yields a low score due to short word count,
+        # but risk is high (0.80). The confidence should be boosted to at least 0.85.
+        conf = ConfidenceEngine.calculate_confidence(
+            word_count=1,
+            llm_audits_done=0,
+            audio_seconds=0.0,
+            retrieval_hits=0,
+            risk_score=0.80
+        )
+        self.assertGreaterEqual(conf, 0.85)
 
 if __name__ == "__main__":
     unittest.main()

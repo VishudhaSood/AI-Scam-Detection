@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import AnalysisDetails from './AnalysisDetails';
 import LiveCallMonitor from './LiveCallMonitor';
 import ReportModal from './ReportModal';
+import { useAuth } from '../context/AuthContext';
 
 const Dashboard = () => {
+  const { authFetch, token } = useAuth();
   const [activeTab, setActiveTab] = useState('audio'); // 'audio', 'text', or 'live'
   const [audioMode, setAudioMode] = useState('upload'); // 'upload' or 'record'
   const [textInput, setTextInput] = useState('');
@@ -23,28 +25,125 @@ const Dashboard = () => {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportData, setReportData] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  // The call a report was opened for, kept so "Regenerate" can re-request the
+  // same call's draft with regenerate=true.
+  const [reportSource, setReportSource] = useState(null);
 
-  const handleOpenReportModal = async (analysisData) => {
+  // When the incident actually happened, not when this draft was produced. A report
+  // opened later from Past Audits must carry the original call's date — that is the
+  // field police correlate against bank transaction logs.
+  const incidentTimestamp = (analysisData) => {
+    if (analysisData?.analyzed_at) {
+      const parsed = new Date(analysisData.analyzed_at);
+      if (!isNaN(parsed.getTime())) return parsed.toLocaleString();
+    }
+    return `${new Date().toLocaleString()} (call in progress at time of drafting)`;
+  };
+
+  const handleOpenReportModal = async (analysisData, { regenerate = false } = {}) => {
     setShowReportModal(true);
+    setReportSource(analysisData);
+    // Clear first: without this the modal keeps rendering the PREVIOUS incident's
+    // complaint — fully formatted and copyable — for the seconds the LLM call takes.
+    setReportData(null);
     setLoadingReport(true);
     try {
-      const response = await fetch('http://localhost:8000/api/v1/analyze/generate-report', {
+      // A saved call carries an id; sending it lets the backend return the stored
+      // draft (no re-generation) or, with regenerate=true, seal a new version.
+      // Mid-call drafts have no id, so the backend generates fresh and stores nothing.
+      const logId = analysisData?.id ?? analysisData?.log_id ?? null;
+      const response = await authFetch('http://localhost:8000/api/v1/analyze/generate-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(analysisData)
+        body: JSON.stringify({ ...analysisData, log_id: logId, regenerate })
       });
       if (response.ok) {
         const data = await response.json();
         setReportData(data);
       } else {
+        const fallbackText = `======================================================================
+INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
+National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+======================================================================
+
+Incident Date & Time: ${incidentTimestamp(analysisData)}
+Report Generated: ${new Date().toLocaleString()}
+Threat Evaluation Label: ${analysisData.label || 'SUSPICIOUS'} (Risk Score: ${Math.round((analysisData.risk_score || 0) * 100)}%)
+Detected Scam Category: ${analysisData.scam_category || 'Scam Suspect'}
+Caller Phone Number: ${analysisData.caller_number || 'Not Provided'}
+Overall Evidence Confidence: ${Math.round((analysisData.overall_confidence || 0.85) * 100)}%
+
+----------------------------------------------------------------------
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------
+On ${incidentTimestamp(analysisData)}, an incoming call was audited by AI Scam Detection and flagged as ${analysisData.label || 'SUSPICIOUS'} (${Math.round((analysisData.risk_score || 0) * 100)}% risk). The transcript exhibits characteristics aligned with ${analysisData.scam_category || 'known scam patterns'}.
+
+----------------------------------------------------------------------
+INCIDENT TRANSCRIPT EXCERPT
+----------------------------------------------------------------------
+"${analysisData.transcript || '(No transcript text recorded)'}"
+
+----------------------------------------------------------------------
+DETECTED RED FLAGS & RISK INDICATORS
+----------------------------------------------------------------------
+${(analysisData.red_flags && analysisData.red_flags.length > 0) ? analysisData.red_flags.map(rf => `- ${rf}`).join('\n') : '- Urgent action demanded / Suspicious request'}
+
+----------------------------------------------------------------------
+MATCHED REGULATORY ADVISORIES & WARNINGS
+----------------------------------------------------------------------
+${(analysisData.advisories && analysisData.advisories.length > 0) ? analysisData.advisories.map(a => `- [${a.source || 'Official'}] ${a.title || 'Advisory'}\n  Details: ${a.description || ''}\n  Reference: ${a.url || ''}`).join('\n\n') : 'None matched.'}
+
+----------------------------------------------------------------------
+AUDIT REASONING TRACE LOGS
+----------------------------------------------------------------------
+${(analysisData.reasoning_trace && analysisData.reasoning_trace.length > 0) ? analysisData.reasoning_trace.map(rt => `- ${rt}`).join('\n') : '- Automated threat engine fusion performed.'}
+
+----------------------------------------------------------------------
+OFFICIAL REPORTING HELPLINES & PORTALS
+----------------------------------------------------------------------
+- Cybercrime Helpline: Call 1930
+- Cybercrime Portal: https://cybercrime.gov.in
+- Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet
+- RBI Sachet Fraud Portal: https://sachet.rbi.org.in
+======================================================================`;
+
         setReportData({
           executive_summary: "Incident summary compiled from verified threat telemetry.",
-          report_text: analysisData.transcript,
-          sha256_hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          report_text: fallbackText,
+          sha256_hash: ""
         });
       }
     } catch (err) {
       console.error("Report generation error:", err);
+      const fallbackText = `======================================================================
+INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
+National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+======================================================================
+
+Incident Date & Time: ${incidentTimestamp(analysisData)}
+Report Generated: ${new Date().toLocaleString()}
+Threat Evaluation Label: ${analysisData.label || 'SUSPICIOUS'} (Risk Score: ${Math.round((analysisData.risk_score || 0) * 100)}%)
+Detected Scam Category: ${analysisData.scam_category || 'Scam Suspect'}
+Caller Phone Number: ${analysisData.caller_number || 'Not Provided'}
+
+----------------------------------------------------------------------
+INCIDENT TRANSCRIPT EXCERPT
+----------------------------------------------------------------------
+"${analysisData.transcript || '(No transcript text recorded)'}"
+
+----------------------------------------------------------------------
+OFFICIAL REPORTING HELPLINES & PORTALS
+----------------------------------------------------------------------
+- Cybercrime Helpline: Call 1930
+- Cybercrime Portal: https://cybercrime.gov.in
+- Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet
+- RBI Sachet Fraud Portal: https://sachet.rbi.org.in
+======================================================================`;
+      setReportData({
+        executive_summary: "Incident summary compiled offline.",
+        report_text: fallbackText,
+        sha256_hash: ""
+      });
     } finally {
       setLoadingReport(false);
     }
@@ -80,7 +179,7 @@ const Dashboard = () => {
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/v1/analyze/history?limit=20');
+      const res = await authFetch('http://127.0.0.1:8000/api/v1/analyze/history?limit=20');
       if (res.ok) {
         const data = await res.json();
         setHistoryLogs(data);
@@ -96,6 +195,13 @@ const Dashboard = () => {
     setShowHistory(true);
     fetchHistory();
   };
+
+  // Auth changed (login/logout): if the history drawer is open, reload it so it
+  // reflects the right owner's audits instead of the previous session's.
+  useEffect(() => {
+    if (showHistory) fetchHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const handleSelectHistoryItem = (log) => {
     setResult(log);
@@ -166,9 +272,12 @@ const Dashboard = () => {
   };
 
   const formatDuration = (seconds) => {
+    if (typeof seconds !== 'number' || isNaN(seconds)) return '00:00';
     const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const secsNum = seconds % 60;
+    const secsFixed = secsNum.toFixed(1);
+    const secsStr = parseFloat(secsFixed) < 10 ? `0${secsFixed}` : `${secsFixed}`;
+    return `${mins.toString().padStart(2, '0')}:${secsStr}`;
   };
 
   // Drag and Drop Handlers
@@ -245,7 +354,7 @@ const Dashboard = () => {
     }
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/analyze', {
+      const response = await authFetch('http://127.0.0.1:8000/api/v1/analyze', {
         method: 'POST',
         body: formData,
       });
@@ -312,15 +421,22 @@ const Dashboard = () => {
     </div>
   );
 
-  const renderSparkline = (timelineJson, label) => {
-    if (!timelineJson) return null;
+  const renderSparkline = (timelineJson, label, rawScore) => {
     let scores = [];
-    try {
-      scores = typeof timelineJson === 'string' ? JSON.parse(timelineJson) : timelineJson;
-    } catch (e) {
-      return null;
+    if (timelineJson) {
+      try {
+        scores = typeof timelineJson === 'string' ? JSON.parse(timelineJson) : timelineJson;
+      } catch (e) {
+        scores = [];
+      }
     }
-    if (!Array.isArray(scores) || scores.length < 2) return null;
+
+    if (!Array.isArray(scores) || scores.length === 0) {
+      const finalScore = typeof rawScore === 'number' ? rawScore : 0.05;
+      scores = [0.05, finalScore];
+    } else if (scores.length === 1) {
+      scores = [0.05, scores[0]];
+    }
 
     const width = 70;
     const height = 22;
@@ -423,7 +539,7 @@ const Dashboard = () => {
                   </span>
                 </div>
 
-                {renderSparkline(log.score_timeline, log.label)}
+                {renderSparkline(log.score_timeline, log.label, log.risk_score)}
 
                 <span className={`risk-badge ${log.label === 'SCAM' ? 'scam' : log.label === 'SUSPICIOUS' ? 'suspicious' : 'safe'}`} style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', flexShrink: 0 }}>
                   {log.label} ({Math.round(log.risk_score * 100)}%)
@@ -667,7 +783,10 @@ const Dashboard = () => {
         onClose={() => setShowReportModal(false)}
         initialReportText={reportData?.report_text}
         sha256Hash={reportData?.sha256_hash}
-        data={result}
+        reportVersion={reportData?.report_version}
+        isLoading={loadingReport}
+        canRegenerate={!!(reportSource?.id ?? reportSource?.log_id)}
+        onRegenerate={() => reportSource && handleOpenReportModal(reportSource, { regenerate: true })}
       />
     </>
   );

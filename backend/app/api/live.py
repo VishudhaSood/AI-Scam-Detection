@@ -65,6 +65,21 @@ async def live_monitor(websocket: WebSocket):
     session = None
     last_update = None
     client_connected = True
+
+    # Optional auth: browsers cannot set headers on a WebSocket, so the bearer
+    # token arrives as a query param (?token=...). Absent/invalid -> anonymous,
+    # and the persisted call keeps user_id NULL.
+    auth_user_id = None
+    _token = websocket.query_params.get("token")
+    if _token:
+        from app.auth.security import decode_token
+        _payload = decode_token(_token)
+        if _payload and "sub" in _payload:
+            try:
+                auth_user_id = int(_payload["sub"])
+            except (TypeError, ValueError):
+                auth_user_id = None
+
     try:
         start = LiveStart.model_validate(await websocket.receive_json())
         session = LiveSession(str(uuid.uuid4()), caller_number=start.caller_number)
@@ -107,7 +122,7 @@ async def live_monitor(websocket: WebSocket):
                 from app.database import crud
                 db = SessionLocal()
                 try:
-                    db_log = crud.save_analysis_result(db, final)
+                    db_log = crud.save_analysis_result(db, final, user_id=auth_user_id)
                     final.log_id = db_log.id
                 finally:
                     db.close()
