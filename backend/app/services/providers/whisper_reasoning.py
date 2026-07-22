@@ -88,7 +88,7 @@ class WhisperReasoningProvider(EvidenceProvider):
             source=self.name,
             score=session.last_llm_risk,
             confidence=confidence,
-            weight=0.40,
+            weight=0.45,
             details={
                 "scam_category": session.llm_scam_category,
                 "red_flags": session.llm_red_flags,

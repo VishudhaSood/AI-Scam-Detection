@@ -95,15 +95,23 @@ class EvidenceFusionEngine:
         else:
             verification_score = 0.0
 
-        # 3. All weights are always active (no optional components)
-        total_weight = sum(cls.WEIGHTS.values())
+        # 3. Determine active weights dynamically
+        # When verification is not applicable/not performed yet, we exclude it
+        # from weight calculations and normalize over the remaining dimensions.
+        weights = cls.WEIGHTS.copy()
+        if verification_verdict in ["N/A", "NOT_YET_ANSWERED"]:
+            weights["verification"] = 0.0
+
+        total_weight = sum(weights.values())
+        if total_weight <= 0.0:
+            total_weight = 1.0
 
         # 4. Compute weighted sum
         weighted_sum = (
-            transcript_risk * cls.WEIGHTS["transcript"] +
-            heuristic_risk * cls.WEIGHTS["heuristics"] +
-            rag_score * cls.WEIGHTS["rag_match"] +
-            verification_score * cls.WEIGHTS["verification"]
+            transcript_risk * weights["transcript"] +
+            heuristic_risk * weights["heuristics"] +
+            rag_score * weights["rag_match"] +
+            verification_score * weights["verification"]
         )
         fused = weighted_sum / total_weight
 
@@ -139,27 +147,42 @@ class ConfidenceEngine:
         word_count: int,
         llm_audits_done: int,
         audio_seconds: float = 0.0,
-        retrieval_hits: int = 0
+        retrieval_hits: int = 0,
+        risk_score: float = 0.0
     ) -> float:
-        # 1. Transcript length coverage (benchmark: 120 words)
-        word_factor = min(1.0, word_count / 120.0)
+        # 1. Transcript length coverage (softer non-linear scaling)
+        # Baseline factor starts high with small counts, reaching 1.0 at 40+ words.
+        word_factor = min(1.0, (word_count / 40.0) ** 0.5) if word_count > 0 else 0.0
         
-        # 2. AI Reasoning depth (benchmark: 2 audits)
-        audit_factor = min(1.0, llm_audits_done / 2.0)
+        # 2. AI Reasoning depth
+        # If at least 1 LLM audit has run, we have full AI reasoning confidence (1.0).
+        # Otherwise, if only heuristics are active, confidence is lower (0.40).
+        audit_factor = 1.0 if llm_audits_done >= 1 else 0.40
         
-        # 3. Audio exposure (benchmark: 30 seconds)
+        # 3. Audio exposure (benchmark: 30 seconds, softer scaling)
         audio_factor = min(1.0, audio_seconds / 30.0) if audio_seconds > 0.0 else 1.0
         
         # 4. Regulatory database alignment
-        retrieval_factor = min(1.0, retrieval_hits / 2.0) if retrieval_hits > 0 else 0.5
+        # Having matched warnings adds confidence, but lack of matches does not penalize (default 0.85).
+        retrieval_factor = 1.0 if retrieval_hits > 0 else 0.85
 
         # Blended geometric mean to prevent single-factor overconfidence
         factors = [word_factor, audit_factor, audio_factor, retrieval_factor]
-        clamped_factors = [max(0.05, f) for f in factors]
+        clamped_factors = [max(0.10, f) for f in factors]
         
         import math
         geom_mean = math.prod(clamped_factors) ** (1.0 / len(clamped_factors))
-        return round(geom_mean, 2)
+        confidence = round(geom_mean, 2)
+        
+        # Boost confidence when threat level is high
+        # If we are certain there is a scam (risk_score >= 0.75), confidence must be at least 0.85.
+        # If it is suspicious (risk_score >= 0.40), confidence must be at least 0.70.
+        if risk_score >= 0.75:
+            confidence = max(confidence, 0.85)
+        elif risk_score >= 0.40:
+            confidence = max(confidence, 0.70)
+            
+        return round(max(0.10, min(1.0, confidence)), 2)
 
 
 class AdaptiveRiskEngine:
@@ -177,7 +200,7 @@ class AdaptiveRiskEngine:
         # Timestamps for exit timers (hysteresis)
         self.verify_exit_low_start = None  # Start timestamp when risk < 0.35 sustained
         self.danger_exit_low_start = None  # Start timestamp when risk < 0.65 sustained
-
+ 
     def process_cycle(
         self,
         risk_raw: float,
@@ -210,13 +233,14 @@ class AdaptiveRiskEngine:
         
         # Round smoothed risk
         self.smoothed_risk = round(max(0.0, min(1.0, self.smoothed_risk)), 2)
-
+ 
         # 3. Dynamic Confidence Calculation
         confidence = ConfidenceEngine.calculate_confidence(
             word_count=word_count,
             llm_audits_done=llm_audits_done,
             audio_seconds=audio_seconds,
-            retrieval_hits=retrieval_hits
+            retrieval_hits=retrieval_hits,
+            risk_score=self.smoothed_risk
         )
 
         # 4. State Machine & Hysteresis

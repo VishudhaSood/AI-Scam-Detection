@@ -24,7 +24,7 @@ class RAGAdvisoryProvider(EvidenceProvider):
                 source=self.name,
                 score=0.0,
                 confidence=0.0,
-                weight=0.10,
+                weight=0.20,
                 details={"count": 0, "advisory_titles": []},
                 explanation="Transcript too short for advisory matching."
             )
@@ -71,7 +71,7 @@ class RAGAdvisoryProvider(EvidenceProvider):
             source=self.name,
             score=score,
             confidence=1.0 if transcript.strip() else 0.0,
-            weight=0.10,
+            weight=0.20,
             details={
                 "count": count,
                 "advisory_titles": [adv.title for adv in advisories]

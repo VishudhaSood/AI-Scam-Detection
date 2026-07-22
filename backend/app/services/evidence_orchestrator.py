@@ -72,7 +72,8 @@ class EvidenceOrchestrator:
                 word_count=word_count,
                 llm_audits_done=1 if transcript.strip() else 0,
                 audio_seconds=audio_seconds,
-                retrieval_hits=int(advisories_count)
+                retrieval_hits=int(advisories_count),
+                risk_score=smoothed_risk
             )
 
         # 3. Generate human-readable explainability reasoning trace

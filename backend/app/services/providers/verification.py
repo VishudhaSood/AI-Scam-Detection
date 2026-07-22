@@ -37,11 +37,14 @@ class VerificationProvider(EvidenceProvider):
             confidence = 0.5
             explanation = "Verification questions asked; waiting for caller response."
 
+        # Dynamically determine weight: inactive (N/A, NOT_YET_ANSWERED) has 0.0 weight
+        weight = 0.10 if verdict in ["EVASIVE", "REFUSED", "THREATENED", "PLAUSIBLE"] else 0.0
+
         return Evidence(
             source=self.name,
             score=score,
             confidence=confidence,
-            weight=0.10,
+            weight=weight,
             details={
                 "verdict": verdict
             },
