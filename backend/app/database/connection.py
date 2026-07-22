@@ -40,6 +40,14 @@ def init_db():
                     conn.execute(text("ALTER TABLE call_logs ADD COLUMN peak_risk REAL"))
                 if "score_timeline" not in existing_cols:
                     conn.execute(text("ALTER TABLE call_logs ADD COLUMN score_timeline TEXT"))
+                if "report_text" not in existing_cols:
+                    conn.execute(text("ALTER TABLE call_logs ADD COLUMN report_text TEXT"))
+                if "report_hash" not in existing_cols:
+                    conn.execute(text("ALTER TABLE call_logs ADD COLUMN report_hash TEXT"))
+                if "report_version" not in existing_cols:
+                    conn.execute(text("ALTER TABLE call_logs ADD COLUMN report_version INTEGER"))
+                if "report_generated_at" not in existing_cols:
+                    conn.execute(text("ALTER TABLE call_logs ADD COLUMN report_generated_at DATETIME"))
     except Exception as e:
         print(f"Database migration notice: {e}")
 

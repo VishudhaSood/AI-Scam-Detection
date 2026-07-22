@@ -23,6 +23,9 @@ const Dashboard = () => {
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportData, setReportData] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  // The call a report was opened for, kept so "Regenerate" can re-request the
+  // same call's draft with regenerate=true.
+  const [reportSource, setReportSource] = useState(null);
 
   // When the incident actually happened, not when this draft was produced. A report
   // opened later from Past Audits must carry the original call's date — that is the
@@ -35,17 +38,22 @@ const Dashboard = () => {
     return `${new Date().toLocaleString()} (call in progress at time of drafting)`;
   };
 
-  const handleOpenReportModal = async (analysisData) => {
+  const handleOpenReportModal = async (analysisData, { regenerate = false } = {}) => {
     setShowReportModal(true);
+    setReportSource(analysisData);
     // Clear first: without this the modal keeps rendering the PREVIOUS incident's
     // complaint — fully formatted and copyable — for the seconds the LLM call takes.
     setReportData(null);
     setLoadingReport(true);
     try {
+      // A saved call carries an id; sending it lets the backend return the stored
+      // draft (no re-generation) or, with regenerate=true, seal a new version.
+      // Mid-call drafts have no id, so the backend generates fresh and stores nothing.
+      const logId = analysisData?.id ?? analysisData?.log_id ?? null;
       const response = await fetch('http://localhost:8000/api/v1/analyze/generate-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(analysisData)
+        body: JSON.stringify({ ...analysisData, log_id: logId, regenerate })
       });
       if (response.ok) {
         const data = await response.json();
@@ -756,8 +764,10 @@ OFFICIAL REPORTING HELPLINES & PORTALS
         onClose={() => setShowReportModal(false)}
         initialReportText={reportData?.report_text}
         sha256Hash={reportData?.sha256_hash}
+        reportVersion={reportData?.report_version}
         isLoading={loadingReport}
-        data={result}
+        canRegenerate={!!(reportSource?.id ?? reportSource?.log_id)}
+        onRegenerate={() => reportSource && handleOpenReportModal(reportSource, { regenerate: true })}
       />
     </>
   );

@@ -1,74 +1,73 @@
 import React, { useState, useEffect } from 'react';
 
-const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, isLoading, data }) => {
-  const [reportContent, setReportContent] = useState('');
-  const [currentHash, setCurrentHash] = useState(sha256Hash || '');
+const ReportModal = ({
+  isOpen,
+  onClose,
+  initialReportText,
+  sha256Hash,
+  isLoading,
+  reportVersion,
+  canRegenerate,
+  onRegenerate,
+}) => {
   const [copied, setCopied] = useState(false);
-  
-  // Victim detail input state
+  const [confirmRegen, setConfirmRegen] = useState(false);
+
+  // Complainant-supplied details. These live in state and are composed into a
+  // clearly-labelled section only at output time — they are NEVER written into
+  // the AI body, so they can always be corrected and they stay OUTSIDE the seal.
   const [victimName, setVictimName] = useState('');
   const [bankName, setBankName] = useState('');
   const [amountLost, setAmountLost] = useState('');
   const [utrRef, setUtrRef] = useState('');
 
-  // Mirror the incoming draft exactly, INCLUDING when it is cleared to null while
-  // a new one is being generated. Guarding on truthiness here would leave the
-  // previous incident's text on screen during the fetch.
-  useEffect(() => {
-    setReportContent(initialReportText || '');
-  }, [initialReportText]);
+  // The AI audit record is read-only: it is the sealed machine finding. The user
+  // customises the complaint through the fields above, not by editing this text.
+  const reportBody = initialReportText || '';
 
-  useEffect(() => {
-    setCurrentHash(sha256Hash || '');
-  }, [sha256Hash]);
-
-  // Victim details belong to one incident — reset them when a different draft
-  // arrives, so a previous complainant's name or loss amount can never be
-  // appended to someone else's complaint.
+  // A new draft (or a regenerated one) clears the user-entered details and any
+  // pending regenerate confirmation, so nothing leaks between incidents.
   useEffect(() => {
     setVictimName('');
     setBankName('');
     setAmountLost('');
     setUtrRef('');
+    setConfirmRegen(false);
   }, [initialReportText]);
-
-  // Recalculate SHA-256 hash dynamically on text changes
-  useEffect(() => {
-    if (!reportContent) {
-      setCurrentHash('');
-      return;
-    }
-    if (window.crypto && window.crypto.subtle) {
-      const encoder = new TextEncoder();
-      const dataBuffer = encoder.encode(reportContent);
-      window.crypto.subtle.digest('SHA-256', dataBuffer).then(hashBuffer => {
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        setCurrentHash(hashHex);
-      }).catch(err => console.error('SHA-256 computation failed:', err));
-    }
-  }, [reportContent]);
 
   if (!isOpen) return null;
 
-  // Insert victim details into the text dynamically if typed
-  const handleInsertDetails = () => {
-    let extraDetails = '\n----------------------------------------------------------------------\nVICTIM & FINANCIAL LOSS DETAILS (USER SUPPLIED)\n----------------------------------------------------------------------\n';
-    if (victimName) extraDetails += `Complainant Name: ${victimName}\n`;
-    if (bankName) extraDetails += `Impersonated Institution / Bank: ${bankName}\n`;
-    if (amountLost) extraDetails += `Financial Loss Amount: ₹${amountLost}\n`;
-    if (utrRef) extraDetails += `Transaction / UTR Ref #: ${utrRef}\n`;
-
-    if (!reportContent.includes('VICTIM & FINANCIAL LOSS DETAILS')) {
-      setReportContent(prev => prev + extraDetails);
-    }
+  // The complainant's own details, as a separate section explicitly marked
+  // user-supplied and outside the AI audit seal.
+  const buildUserSection = () => {
+    const lines = [];
+    if (victimName) lines.push(`Complainant Name: ${victimName}`);
+    if (bankName) lines.push(`Impersonated Institution / Bank: ${bankName}`);
+    if (amountLost) lines.push(`Financial Loss Amount: ₹${amountLost}`);
+    if (utrRef) lines.push(`Transaction / UTR Ref #: ${utrRef}`);
+    if (lines.length === 0) return '';
+    return (
+      '\n\n======================================================================\n' +
+      'COMPLAINANT-SUPPLIED DETAILS (entered by user; NOT part of the AI audit seal)\n' +
+      '======================================================================\n' +
+      lines.join('\n')
+    );
   };
 
+  // Final document = sealed AI body + the seal block (the server hash computed
+  // over exactly that body) + the user-supplied section. The seal covers ONLY the
+  // AI record above it — the user's own entries sit outside it, by design.
   const getFullFinalText = () => {
-    if (reportContent.includes('DIGITAL INTEGRITY & AUDIT TRAIL')) {
-      return reportContent;
-    }
-    return reportContent + `\n\n======================================================================\nDIGITAL INTEGRITY & AUDIT TRAIL\n======================================================================\nCryptographic SHA-256 Hash: ${currentHash}\nGenerated & Verified by AI Scam Detection Platform Engine\n======================================================================`;
+    const seal =
+      '\n\n======================================================================\n' +
+      'DIGITAL INTEGRITY & AUDIT SEAL\n' +
+      '======================================================================\n' +
+      `This SHA-256 seal covers the AI audit record above (Version ${reportVersion || 1}).\n` +
+      'Any change to that record produces a different hash.\n' +
+      `Cryptographic SHA-256: ${sha256Hash || '(unavailable)'}\n` +
+      'Generated & Verified by AI Scam Detection Platform Engine\n' +
+      '======================================================================';
+    return reportBody + seal + buildUserSection();
   };
 
   const handleCopy = () => {
@@ -90,32 +89,39 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, isLoading
     URL.revokeObjectURL(url);
   };
 
+  // Regenerating overwrites a sealed document, so it takes two clicks: the first
+  // arms it (and auto-disarms after 4s), the second actually redoes it.
+  const handleRegenerateClick = () => {
+    if (!confirmRegen) {
+      setConfirmRegen(true);
+      setTimeout(() => setConfirmRegen(false), 4000);
+      return;
+    }
+    setConfirmRegen(false);
+    if (onRegenerate) onRegenerate();
+  };
+
+  const actionsDisabled = isLoading || !reportBody;
+  const inputStyle = {
+    width: '100%', padding: '0.35rem 0.6rem', fontSize: '0.75rem',
+    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: '0.375rem', color: '#fff',
+  };
+  const labelStyle = { fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' };
+
   return (
     <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.8)',
-      backdropFilter: 'blur(8px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1100,
-      padding: '1.5rem'
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1100, padding: '1.5rem',
     }}>
       <div className="glass-panel" style={{
-        width: '100%',
-        maxWidth: '820px',
-        maxHeight: '90vh',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '1.5rem',
+        width: '100%', maxWidth: '820px', maxHeight: '90vh',
+        display: 'flex', flexDirection: 'column', padding: '1.5rem',
         background: 'var(--bg-secondary, #111827)',
         border: '1px solid var(--border-light, rgba(255, 255, 255, 0.15))',
-        borderRadius: '0.75rem',
-        boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
+        borderRadius: '0.75rem', boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
       }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.75rem' }}>
@@ -124,97 +130,60 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, isLoading
               📝 Cybercrime Incident Complaint Editor
             </h3>
             <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue, #3b82f6)', fontFamily: 'var(--font-mono)' }}>
-              🛡️ Legal Audit SHA-256: {isLoading ? 'pending draft...' : (currentHash ? currentHash.substring(0, 24) + '...' : 'computing...')}
+              🛡️ Audit Seal SHA-256: {isLoading ? 'sealing…' : (sha256Hash ? sha256Hash.substring(0, 24) + '…' : '(unavailable)')}
+              {'  ·  '}v{reportVersion || 1}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}
-          >
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>
             ✕
           </button>
         </div>
 
-        {/* Form Inputs for Victim Details */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        {/* Complainant detail inputs — always live-editable, composed at output */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem', marginBottom: '0.35rem' }}>
           <div>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Your Name (Optional)</label>
-            <input
-              type="text"
-              placeholder="e.g. Rahul Sharma"
-              value={victimName}
-              onChange={(e) => setVictimName(e.target.value)}
-              onBlur={handleInsertDetails}
-              style={{ width: '100%', padding: '0.35rem 0.6rem', fontSize: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.375rem', color: '#fff' }}
-            />
+            <label style={labelStyle}>Your Name (Optional)</label>
+            <input type="text" placeholder="e.g. Rahul Sharma" value={victimName} onChange={(e) => setVictimName(e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Bank / Institution (Optional)</label>
-            <input
-              type="text"
-              placeholder="e.g. SBI / HDFC"
-              value={bankName}
-              onChange={(e) => setBankName(e.target.value)}
-              onBlur={handleInsertDetails}
-              style={{ width: '100%', padding: '0.35rem 0.6rem', fontSize: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.375rem', color: '#fff' }}
-            />
+            <label style={labelStyle}>Bank / Institution (Optional)</label>
+            <input type="text" placeholder="e.g. SBI / HDFC" value={bankName} onChange={(e) => setBankName(e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Loss Amount ₹ (Optional)</label>
-            <input
-              type="number"
-              placeholder="e.g. 50000"
-              value={amountLost}
-              onChange={(e) => setAmountLost(e.target.value)}
-              onBlur={handleInsertDetails}
-              style={{ width: '100%', padding: '0.35rem 0.6rem', fontSize: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.375rem', color: '#fff' }}
-            />
+            <label style={labelStyle}>Loss Amount ₹ (Optional)</label>
+            <input type="number" placeholder="e.g. 50000" value={amountLost} onChange={(e) => setAmountLost(e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>UTR / Ref # (Optional)</label>
-            <input
-              type="text"
-              placeholder="e.g. UTR123456789"
-              value={utrRef}
-              onChange={(e) => setUtrRef(e.target.value)}
-              onBlur={handleInsertDetails}
-              style={{ width: '100%', padding: '0.35rem 0.6rem', fontSize: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.375rem', color: '#fff' }}
-            />
+            <label style={labelStyle}>UTR / Ref # (Optional)</label>
+            <input type="text" placeholder="e.g. UTR123456789" value={utrRef} onChange={(e) => setUtrRef(e.target.value)} style={inputStyle} />
           </div>
         </div>
+        <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', margin: '0 0 0.75rem 0' }}>
+          These are added as a separate “complainant-supplied” section — outside the AI seal — when you copy or download. Edit freely; corrections always apply.
+        </p>
 
-        {/* Editable Textarea */}
+        {/* Sealed AI audit body — read-only */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', marginBottom: '1rem' }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.35rem', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Editable Complaint Body (Review & edit before downloading)</span>
-            <span>{isLoading ? 'drafting…' : `${reportContent.length} chars`}</span>
+            <span>🔒 AI Audit Record (sealed &amp; read-only)</span>
+            <span>{isLoading ? 'drafting…' : `${reportBody.length} chars`}</span>
           </label>
           <textarea
-            value={isLoading ? 'Drafting complaint from the audited call record…' : reportContent}
-            onChange={(e) => setReportContent(e.target.value)}
-            readOnly={isLoading}
+            value={isLoading ? 'Drafting complaint from the audited call record…' : reportBody}
+            readOnly
             rows={12}
             style={{
-              width: '100%',
-              flex: 1,
-              padding: '0.75rem',
-              fontSize: '0.8rem',
-              fontFamily: 'var(--font-mono, monospace)',
-              lineHeight: 1.5,
-              background: 'rgba(0, 0, 0, 0.4)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              borderRadius: '0.375rem',
-              color: isLoading ? 'var(--text-muted, #9ca3af)' : '#f3f4f6',
-              fontStyle: isLoading ? 'italic' : 'normal',
-              resize: 'vertical'
+              width: '100%', flex: 1, padding: '0.75rem', fontSize: '0.8rem',
+              fontFamily: 'var(--font-mono, monospace)', lineHeight: 1.5,
+              background: 'rgba(0, 0, 0, 0.4)', border: '1px solid rgba(255, 255, 255, 0.15)',
+              borderRadius: '0.375rem', color: isLoading ? 'var(--text-muted, #9ca3af)' : '#f3f4f6',
+              fontStyle: isLoading ? 'italic' : 'normal', resize: 'vertical', cursor: 'default',
             }}
           />
         </div>
 
         {/* Government Portal Links & Action Buttons */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {/* External Links */}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <a href="https://cybercrime.gov.in" target="_blank" rel="noreferrer" className="advisory-link" style={{ fontSize: '0.7rem', padding: '0.3rem 0.6rem' }}>
               🚨 Helpline 1930 Cybercrime Portal
@@ -227,28 +196,44 @@ const ReportModal = ({ isOpen, onClose, initialReportText, sha256Hash, isLoading
             </a>
           </div>
 
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-            {/* Disabled until the draft arrives — otherwise these would copy or
-                download the placeholder text, or an empty document. */}
-            <button
-              type="button"
-              onClick={handleCopy}
-              disabled={isLoading || !reportContent}
-              className="submit-btn"
-              style={{ background: copied ? 'var(--color-safe, #10b981)' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', opacity: (isLoading || !reportContent) ? 0.45 : 1, cursor: (isLoading || !reportContent) ? 'not-allowed' : 'pointer' }}
-            >
-              {copied ? '✓ Copied to Clipboard!' : '📋 Copy Text'}
-            </button>
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={isLoading || !reportContent}
-              className="submit-btn"
-              style={{ width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', background: 'var(--accent-purple, #8b5cf6)', opacity: (isLoading || !reportContent) ? 0.45 : 1, cursor: (isLoading || !reportContent) ? 'not-allowed' : 'pointer' }}
-            >
-              📥 Download Official .txt Complaint
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {/* Regenerate (left): only for a saved call, two-step to avoid an
+                accidental overwrite of a sealed document. */}
+            <div>
+              {canRegenerate && (
+                <button
+                  type="button"
+                  onClick={handleRegenerateClick}
+                  disabled={isLoading}
+                  className="submit-btn"
+                  title="Deliberately re-draft this report; overwrites the current sealed version and bumps its version number."
+                  style={{
+                    width: 'auto', padding: '0.5rem 1.1rem', fontSize: '0.8rem',
+                    background: confirmRegen ? 'var(--color-scam, #ef4444)' : 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    opacity: isLoading ? 0.45 : 1, cursor: isLoading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isLoading ? '⏳ Drafting…' : confirmRegen ? `⚠️ Confirm — overwrite sealed v${reportVersion || 1}?` : '🔄 Regenerate'}
+                </button>
+              )}
+            </div>
+
+            {/* Copy / Download (right) */}
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                type="button" onClick={handleCopy} disabled={actionsDisabled} className="submit-btn"
+                style={{ background: copied ? 'var(--color-safe, #10b981)' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', opacity: actionsDisabled ? 0.45 : 1, cursor: actionsDisabled ? 'not-allowed' : 'pointer' }}
+              >
+                {copied ? '✓ Copied to Clipboard!' : '📋 Copy Text'}
+              </button>
+              <button
+                type="button" onClick={handleDownload} disabled={actionsDisabled} className="submit-btn"
+                style={{ width: 'auto', padding: '0.5rem 1.25rem', fontSize: '0.8rem', background: 'var(--accent-purple, #8b5cf6)', opacity: actionsDisabled ? 0.45 : 1, cursor: actionsDisabled ? 'not-allowed' : 'pointer' }}
+              >
+                📥 Download Official .txt Complaint
+              </button>
+            </div>
           </div>
         </div>
       </div>

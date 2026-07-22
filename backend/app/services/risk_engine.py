@@ -14,12 +14,23 @@ class EvidenceFusionEngine:
     - Transcript floor: the fused score is always at least as high as the transcript risk.
     """
     
-    # Configurable weights for each evidence component
-    # Sum of all weights = 1.0
+    # Configurable weights for each evidence component. Sum = 1.0.
     # Note: Deepfake/AASIST removed — its parallel mic capture degraded WebSpeech.
+    #
+    # Transcript (the LLM) is the semantic authority, but its dimension is 0 until
+    # the first audit fires — so before the LLM the score can climb no higher than
+    # (1 - transcript). At transcript 0.60 that pre-LLM cap is 0.40, which left a
+    # loud-keyword scam sitting in MONITOR (SAFE) through the opening seconds and
+    # whenever Groq was rate-limited. Reverting transcript to 0.45 lifts the cap to
+    # 0.55 and gives the always-available keyword tripwire enough weight (0.25) to
+    # reach VERIFY on its own. This costs no LLM authority: the transcript FLOOR in
+    # fuse_evidence already pins the score to the LLM the instant it audits,
+    # regardless of weight. Depends on the protective-phrase negation fix in
+    # heuristic_scorer.py — 0.25 also re-arms keyword false positives, which that
+    # fix keeps quiet (and the 0.55 cap keeps any that slip through reversible).
     WEIGHTS = {
-        "transcript": 0.60,      # LLM analysis (Groq llama-3.3) - primary semantic authority
-        "heuristics": 0.10,      # Fast keyword scanner - light tripwire signal
+        "transcript": 0.45,      # LLM analysis (Groq llama-3.3) - primary semantic authority
+        "heuristics": 0.25,      # Fast keyword scanner - tripwire that can reach VERIFY pre-LLM
         "rag_match": 0.20,       # ChromaDB advisory match strength
         "verification": 0.10      # Caller response to verification questions
     }

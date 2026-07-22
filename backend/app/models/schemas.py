@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -48,6 +48,37 @@ class AnalysisResponse(BaseModel):
     peak_risk: Optional[float] = Field(None, description="Peak risk score reached during the session.")
     score_timeline: Optional[str] = Field(None, description="JSON list of smoothed risk scores over time.")
     analyzed_at: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of when the analysis was performed.")
+    id: Optional[int] = Field(None, description="Database id of the saved call log; lets the report endpoint cache the complaint draft against this call.")
+
+
+class ReportRequest(BaseModel):
+    """
+    Request body for POST /analyze/generate-report.
+
+    A transcript is required: without it there is no incident to document, so an
+    empty body is a 422 rather than a police complaint drafted about
+    "(no speech captured)". Every other field is optional and mirrors the
+    AnalysisResponse the frontend already holds; ReportGenerator fills sensible
+    defaults for anything absent. The `label` decides the document's nature —
+    SCAM/SUSPICIOUS yields a cybercrime complaint draft, SAFE a neutral audit
+    record — so it is validated here rather than left to a free-form dict.
+    """
+    transcript: str = Field(..., min_length=1, description="Transcript of the audited call. Required.")
+    risk_score: float = Field(0.0, ge=0.0, le=1.0, description="Final smoothed risk score.")
+    label: str = Field("SUSPICIOUS", description="Verdict: SAFE, SUSPICIOUS, or SCAM. Drives complaint vs. audit-record framing.")
+    scam_category: str = Field("None", description="Detected scam category, or 'None'.")
+    overall_confidence: float = Field(0.0, ge=0.0, le=1.0, description="Overall evidence confidence.")
+    explanation: str = Field("", description="Why the call was classified this way.")
+    caller_number: Optional[str] = Field("Not Provided", description="Caller phone number if known.")
+    duration_s: Optional[float] = Field(None, description="Call duration in seconds, if measured.")
+    peak_risk: Optional[float] = Field(None, description="Peak risk reached during the call, if measured.")
+    deepfake_probability: Optional[float] = Field(None, description="Synthetic-voice likelihood if measured; None means not checked.")
+    analyzed_at: Optional[datetime] = Field(None, description="When the call was audited; None for a report drafted mid-call.")
+    advisories: List[Dict[str, Any]] = Field(default=[], description="Matched regulatory advisories (title/source/description/url).")
+    reasoning_trace: List[str] = Field(default=[], description="Audit reasoning-trace steps.")
+    red_flags: List[str] = Field(default=[], description="Red-flag phrases heard on the call.")
+    log_id: Optional[int] = Field(None, description="Saved call id to cache the draft against. When present, a stored draft is returned unchanged; when absent (mid-call), the draft is generated fresh and not stored.")
+    regenerate: bool = Field(False, description="When true and log_id is set, discard the stored draft and generate a new sealed version (bumps report_version).")
 
 
 # ---------------------------------------------------------------------------

@@ -71,6 +71,19 @@ class ReportGenerator:
         
         peak_risk = data.get("peak_risk")
 
+        # A SCAM/SUSPICIOUS verdict produces a cybercrime complaint draft; a SAFE
+        # verdict must NOT. A complaint filed with helpline 1930 over a call that
+        # showed no fraud indicators is a false report, with real consequences for
+        # the complainant. For SAFE we still emit a useful artifact — a neutral
+        # audit record — but drop the complaint framing and the reporting portals.
+        is_complaint = str(label).upper() in ("SCAM", "SUSPICIOUS")
+
+        # Report version is stamped into the sealed body so a regeneration is
+        # visible on the face of the document (v1 = original; higher = redone).
+        # The endpoint supplies it; a mid-call draft with no stored row is v1.
+        report_version = data.get("report_version", 1)
+        version_note = " (regenerated)" if isinstance(report_version, int) and report_version > 1 else ""
+
         # When the call happened, vs. when this document was produced. These are
         # only the same for a report drafted mid-call or right after hang-up — a
         # report opened later from Past Audits must still carry the date police
@@ -155,13 +168,38 @@ class ReportGenerator:
         else:
             voice_line = "Not checked - automated voice-spoof detection was not applied to this call"
 
+        if is_complaint:
+            doc_title = "INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT"
+            doc_subtitle = "National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930"
+            closing_section = (
+                "----------------------------------------------------------------------\n"
+                "OFFICIAL REPORTING HELPLINES & PORTALS\n"
+                "----------------------------------------------------------------------\n"
+                "- Cybercrime Helpline: Call 1930\n"
+                "- Cybercrime Portal: https://cybercrime.gov.in\n"
+                "- Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet\n"
+                "- RBI Sachet Fraud Portal: https://sachet.rbi.org.in"
+            )
+        else:
+            doc_title = "CALL AUDIT RECORD"
+            doc_subtitle = "Automated call audit - no fraud indicators found; not a complaint"
+            closing_section = (
+                "----------------------------------------------------------------------\n"
+                "DISPOSITION\n"
+                "----------------------------------------------------------------------\n"
+                "No fraud indicators were identified on this call. This record is retained\n"
+                "for audit completeness only; it is not a cybercrime complaint, and no\n"
+                "action with any helpline or authority is required or implied."
+            )
+
         full_report_text = f"""======================================================================
-INCIDENT AUDIT REPORT & CYBERCRIME COMPLAINT DRAFT
-National Cyber Crime Reporting Portal (cybercrime.gov.in) / Helpline 1930
+{doc_title}
+{doc_subtitle}
 ======================================================================
 
 Incident Date & Time: {incident_str}
 Report Generated: {generated_str}
+Report Version: {report_version}{version_note}
 Threat Evaluation Label: {label} (Risk Score: {int(round(risk_score * 100))}%)
 Detected Scam Category: {scam_category}
 Caller Phone Number: {caller_number if caller_number else 'Not Provided'}
@@ -193,13 +231,7 @@ AUDIT REASONING TRACE LOGS
 ----------------------------------------------------------------------
 {reasoning_text}
 
-----------------------------------------------------------------------
-OFFICIAL REPORTING HELPLINES & PORTALS
-----------------------------------------------------------------------
-- Cybercrime Helpline: Call 1930
-- Cybercrime Portal: https://cybercrime.gov.in
-- Department of Telecommunications (DoT Chakshu): https://sancharsaathi.gov.in/sachet
-- RBI Sachet Fraud Portal: https://sachet.rbi.org.in
+{closing_section}
 ======================================================================="""
 
         # 4. Compute SHA-256 audit hash
@@ -217,10 +249,14 @@ OFFICIAL REPORTING HELPLINES & PORTALS
         Calls Groq/OpenRouter via query_engine's client resolver to write a formal 2-sentence summary.
         Falls back to a deterministic template if API call fails or times out.
         """
+        if scam_category and str(scam_category).lower() not in ("none", ""):
+            pattern_sentence = f"The call exhibited characteristics matching {scam_category} scam patterns."
+        else:
+            pattern_sentence = "No specific scam pattern was identified during the call."
         fallback_summary = (
-            f"On {incident_str}, an incoming phone call was audited by AI Scam Detection and classified as {label} "
-            f"with a risk score of {int(round(risk_score * 100))}%. The call exhibited characteristics matching "
-            f"{scam_category} scam patterns."
+            f"On {incident_str}, an incoming phone call was audited by AI Scam Detection and "
+            f"classified as {label} with a risk score of {int(round(risk_score * 100))}%. "
+            f"{pattern_sentence}"
         )
 
         try:
@@ -234,7 +270,7 @@ OFFICIAL REPORTING HELPLINES & PORTALS
             # instructions are not a source of facts.
             system_prompt = (
                 "You draft factual incident summaries for fraud audit records.\n\n"
-                "TASK: Write exactly two sentences summarising a suspicious phone call, "
+                "TASK: Write exactly two sentences summarising a phone call, "
                 "using only the FACT BULLETS supplied by the user.\n\n"
                 "RULES:\n"
                 "1. The FACT BULLETS are your only source of information. Nothing in "
@@ -264,9 +300,13 @@ OFFICIAL REPORTING HELPLINES & PORTALS
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.2,
+                    # temperature=0.0: the same call must always yield the same
+                    # summary, so the stored document and its SHA-256 seal never
+                    # drift between openings. Different calls still read
+                    # differently because their FACT BULLETS differ.
+                    temperature=0.0,
                     max_tokens=150,
-                    timeout=8.0
+                    timeout=10.0
                 )
             )
 
